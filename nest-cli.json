@@ -19,6 +19,15 @@
         "tsConfigPath": "apps/content-manager/tsconfig.app.json"
       }
     },
+    "content-parser": {
+      "type": "application",
+      "root": "apps/content-parser",
+      "entryFile": "main",
+      "sourceRoot": "apps/content-parser/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/content-parser/tsconfig.app.json"
+      }
+    },
     "core": {
       "type": "application",
       "root": "apps/core",
