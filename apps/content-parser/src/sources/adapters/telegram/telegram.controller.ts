@@ -12,6 +12,19 @@ export class TelegramController {
         return 'pong';
     }
 
+    @Get('get/messages')
+    async getMessages(
+        @Body() dto: { peer: string; offsetId?: number; limit?: number, sessionName?: string }
+    ) {
+        const messages = await this.telegramMessage.getMessages({
+            peer: dto.peer,
+            offsetId: dto.offsetId,
+            limit: dto.limit,
+            sessionName: dto.sessionName
+        });
+        return {status: 'ok', data: messages};
+    }
+
     @Post('send/message')
     async sendMessage(
         @Body() dto: { peer: string; message: string; sessionName?: string }
