@@ -12,6 +12,7 @@ import {TelegramModuleOptions} from './telegram.types';
 import {TELEGRAM_CLIENTS, TELEGRAM_MODULE_OPTIONS} from './telegram.tokens';
 import {TelegramClientsMap, telegramClientsProvider} from './telegram.provider';
 import {TelegramService} from './telegram.service';
+import {TelegramProcessor} from './processors/telegram.processor';
 
 type TelegramModuleAsyncOptions = {
     imports?: ModuleMetadata['imports'];
@@ -45,6 +46,7 @@ export class TelegramModule implements OnApplicationShutdown {
                 asyncOptionsProvider,
                 telegramClientsProvider,
                 TelegramService,
+                TelegramProcessor,
                 ...(options.services ?? []),
             ],
             exports: [
