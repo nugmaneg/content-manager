@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AiServiceController } from './ai-service.controller';
 import { AiServiceService } from './ai-service.service';
+import { AiProcessingProducer } from './queues/ai-processing.producer';
 
 describe('AiServiceController', () => {
   let aiServiceController: AiServiceController;
@@ -8,7 +9,16 @@ describe('AiServiceController', () => {
   beforeEach(async () => {
     const app: TestingModule = await Test.createTestingModule({
       controllers: [AiServiceController],
-      providers: [AiServiceService],
+      providers: [
+        AiServiceService,
+        {
+          provide: AiProcessingProducer,
+          useValue: {
+            enqueueGenerateText: jest.fn(),
+            enqueueAnalyzeText: jest.fn(),
+          },
+        },
+      ],
     }).compile();
 
     aiServiceController = app.get<AiServiceController>(AiServiceController);
