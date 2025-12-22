@@ -18,7 +18,9 @@
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
     "paths": {
-      "@queue-contracts/*": ["libs/queue-contracts/src/*"]
+      "@queue-contracts/*": [
+        "libs/queue-contracts/src/*"
+      ]
     }
   }
 }
