@@ -1,6 +1,5 @@
 import {
   JOBS_TELEGRAM_SOURCE_PARSER,
-  ParseTelegramMessagePayload,
   ParseTelegramSendMessagePayload,
   ParseTelegramGetMessagePayload,
   ParseTelegramMessageResult,
@@ -9,16 +8,14 @@ import {
   TelegramParserJobName,
 } from '@queue-contracts/telegram';
 
-// Имя очереди можно переопределить через env (поддерживаются оба ключа), иначе используется дефолт.
+// Queue name can be overridden via env (supports both keys), otherwise uses shared default.
 export const QUEUE_TELEGRAM_PARSE =
   process.env.TELEGRAM_PARSER_QUEUE ??
   process.env.TELEGRAM_PARSE_QUEUE ??
   DEFAULT_QUEUE_TELEGRAM_PARSE;
 
 export { JOBS_TELEGRAM_SOURCE_PARSER };
-
 export type {
-  ParseTelegramMessagePayload,
   ParseTelegramSendMessagePayload,
   ParseTelegramGetMessagePayload,
   ParseTelegramMessageResult,

@@ -3,10 +3,10 @@ import { ContentParserModule } from './content-parser.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(ContentParserModule);
-  
+
   // Включаем обработку сигналов завершения (SIGTERM, SIGINT)
   app.enableShutdownHooks();
-  
-  await app.listen(process.env.port ?? 3000);
+
+  await app.listen(process.env.port ?? 3001);
 }
 bootstrap();

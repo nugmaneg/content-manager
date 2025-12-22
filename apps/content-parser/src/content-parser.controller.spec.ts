@@ -11,7 +11,9 @@ describe('ContentParserController', () => {
       providers: [ContentParserService],
     }).compile();
 
-    contentParserController = app.get<ContentParserController>(ContentParserController);
+    contentParserController = app.get<ContentParserController>(
+      ContentParserController,
+    );
   });
 
   describe('root', () => {
