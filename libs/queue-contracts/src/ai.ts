@@ -26,8 +26,21 @@ export interface AnalyzeTextPayload {
 }
 
 export interface AiAnalysisResult {
-    summary?: string;
-    sentiment?: string;
-    keywords?: string[];
+    summary: string;
+    sentiment: 'positive' | 'neutral' | 'negative' | 'unknown';
+    keywords: string[];
+    entities?: {
+        organizations?: string[];
+        people?: string[];
+        tickers?: string[];
+        locations?: string[];
+    };
+    category?: string;
+    language?: string;
+    factCheck?: {
+        verdict: 'verified' | 'partially_true' | 'false' | 'unverified' | 'opinion';
+        score: number;
+        explanation: string;
+    };
     [key: string]: any;
 }

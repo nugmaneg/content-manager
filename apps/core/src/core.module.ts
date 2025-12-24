@@ -4,10 +4,11 @@ import { CoreController } from './core.controller';
 import { CoreService } from './core.service';
 import { QueuesModule } from './queues/queues.module';
 import { TelegramQueueController } from './telegram-queue.controller';
+import { PipelineModule } from './pipeline/pipeline.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), QueuesModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), QueuesModule, PipelineModule],
   controllers: [CoreController, TelegramQueueController],
   providers: [CoreService],
 })
-export class CoreModule {}
+export class CoreModule { }

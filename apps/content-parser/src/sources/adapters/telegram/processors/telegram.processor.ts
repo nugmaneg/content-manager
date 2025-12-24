@@ -50,6 +50,7 @@ export class TelegramProcessor extends WorkerHost {
           peer,
           offsetId: getData.offsetId,
           sessionName,
+          limit: getData.limit, // Pass the limit
         });
         return { status: 'received', messages: messages };
 

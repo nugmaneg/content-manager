@@ -1,8 +1,8 @@
-
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createXai } from '@ai-sdk/xai';
-import { generateText } from 'ai';
+import { generateText, Output } from 'ai';
+import { z } from 'zod';
 import { AiProvider, AiAnalysisResult, GenerationOptions } from '../../interfaces/ai-provider.interface';
 
 @Injectable()
@@ -38,24 +38,51 @@ export class XAiProvider implements AiProvider {
     }
 
     async analyzeText(text: string): Promise<AiAnalysisResult> {
-        // Basic analysis prompt for xAI
-        const prompt = `Analyze the following text. Provide a summary, detect the sentiment, and extract key keywords. Return the result in JSON format with keys: "summary", "sentiment", "keywords".
-    
-    Text:
-    ${text}`;
-
         try {
-            // Reuse generateText which now uses the AI SDK
-            const response = await this.generateText(prompt, { model: 'grok-beta', temperature: 0.3 });
+            // Using native xAI search capability via searchParameters.
+            // This allows the model to access the internet for fact-checking without manual tool management.
+            const { output } = await generateText({
+                model: this.xai('grok-4-1-fast-reasoning'),
+                output: Output.object({
+                    schema: z.object({
+                        summary: z.string().describe('Краткое содержание текста на русском языке'),
+                        sentiment: z.enum(['positive', 'neutral', 'negative', 'unknown']).describe('Эмоциональный окрас текста'),
+                        keywords: z.array(z.string()).describe('Список ключевых слов'),
+                        entities: z.object({
+                            organizations: z.array(z.string()).optional().describe('Упомянутые организации'),
+                            people: z.array(z.string()).optional().describe('Упомянутые люди'),
+                            tickers: z.array(z.string()).optional().describe('Биржевые тикеры (BTC, TON и т.д.)'),
+                            locations: z.array(z.string()).optional().describe('Географические локации'),
+                        }).optional().describe('Извлеченные сущности (NER)'),
+                        category: z.string().optional().describe('Категория контента'),
+                        language: z.string().optional().describe('Язык оригинала (ISO код)'),
+                        factCheck: z.object({
+                            verdict: z.enum(['verified', 'partially_true', 'false', 'unverified', 'opinion']).describe('Вердикт факт-чекинга'),
+                            score: z.number().min(0).max(1).describe('Оценка достоверности (0-1)'),
+                            explanation: z.string().describe('Объяснение вердикта на русском языке'),
+                        }).optional().describe('Результаты факт-чекинга'),
+                    }),
+                }),
+                providerOptions: {
+                    xai: {
+                        searchParameters: { mode: 'auto' },
+                    },
+                },
+                system: `Ты — профессиональный аналитик контента из Telegram. 
+                Твоя задача — проводить глубокий анализ сообщений.
+                Всегда делай краткое резюме (summary) на РУССКОМ ЯЗЫКЕ, независимо от языка оригинала.
+                Извлекай все значимые сущности (имена, компании, тикеры активов).
+                Проводи факт-чекинг: оценивай достоверность утверждений.
+                ИСПОЛЬЗУЙ ДОСТУП В ИНТЕРНЕТ (Live Search) для проверки сомнительных фактов, свежих новостей или данных, которые требуют уточнения.
+                Выявляй потенциальную дезинформацию или манипуляции.`,
+                prompt: `Проанализируй следующий текст:\n\n${text}`,
+            });
 
-            // Attempt to parse JSON from the response
-            // Grok might return markdown code blocks, so we need to strip them
-            const cleanJson = response.replace(/```json/g, '').replace(/```/g, '').trim();
-            return JSON.parse(cleanJson);
+            return output as any as AiAnalysisResult;
         } catch (error) {
-            this.logger.error('Error analyzing text with xAI', error);
+            this.logger.error('Error analyzing text with xAI (structured)', error);
             return {
-                summary: 'Error analyzing text',
+                summary: text.slice(0, 100) + '...',
                 sentiment: 'unknown',
                 keywords: [],
             };

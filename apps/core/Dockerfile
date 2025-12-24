@@ -28,4 +28,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD node -e "require('http').get('http://127.0.0.1:3000/health', (r)=>{process.exit(r.statusCode===200?0:1)})" || exit 1
 ENTRYPOINT ["/usr/bin/dumb-init","--"]
-CMD ["node","dist/apps/core/main.js"]
+CMD ["node","dist/apps/core/apps/core/src/main.js"]

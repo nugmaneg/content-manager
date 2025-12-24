@@ -17,6 +17,7 @@ export type ParseTelegramGetMessagePayload = {
   peer: string;
   offsetId?: number;
   sessionName?: string;
+  limit?: number;
 };
 
 export type ParseTelegramMessagePayload =

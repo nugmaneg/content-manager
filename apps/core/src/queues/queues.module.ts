@@ -1,11 +1,17 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { QUEUE_AI_PROCESSING } from '@queue-contracts/ai';
+import { AiProducer } from './ai.producer';
 import { QUEUE_TELEGRAM_PARSE } from './queues.constants';
 import { TelegramParseProducer } from './telegram-parse.producer';
 
 const telegramQueueRegistration = BullModule.registerQueue({
   name: QUEUE_TELEGRAM_PARSE,
+});
+
+const aiQueueRegistration = BullModule.registerQueue({
+  name: QUEUE_AI_PROCESSING,
 });
 
 @Module({
@@ -32,8 +38,9 @@ const telegramQueueRegistration = BullModule.registerQueue({
       }),
     }),
     telegramQueueRegistration,
+    aiQueueRegistration,
   ],
-  providers: [TelegramParseProducer],
-  exports: [telegramQueueRegistration, TelegramParseProducer],
+  providers: [TelegramParseProducer, AiProducer],
+  exports: [TelegramParseProducer, AiProducer, telegramQueueRegistration, aiQueueRegistration],
 })
-export class QueuesModule {}
+export class QueuesModule { }

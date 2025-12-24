@@ -28,4 +28,4 @@ EXPOSE 3002
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD node -e "require('http').get('http://127.0.0.1:3002/ai/health', (r)=>{process.exit(r.statusCode===200?0:1)})" || exit 1
 ENTRYPOINT ["/usr/bin/dumb-init","--"]
-CMD ["node","dist/apps/ai-service/main.js"]
+CMD ["node","dist/apps/ai-service/apps/ai-service/src/main.js"]
