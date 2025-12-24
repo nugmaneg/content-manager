@@ -1,64 +1,70 @@
+version: "3.8"
 
 services:
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    container_name: cm-redis
+    ports: [ "6379:6379" ]
     restart: always
+    volumes: [ redis-data:/data ]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 5
+    networks: [ cm-network ]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
 
   core:
-    build:
-      context: .
-      dockerfile: apps/core/Dockerfile
-    env_file:
-      - .env
+    build: { context: ., dockerfile: apps/core/Dockerfile }
+    container_name: cm-core
+    env_file: [ .env ]
     environment:
+      - PORT=3000
       - REDIS_URL=redis://redis:6379
-      - REDIS_PREFIX=dev
-    depends_on:
-      redis:
-        condition: service_healthy
-    ports:
-      - "3000:3000"
+    depends_on: { redis: { condition: service_healthy } }
+    ports: [ "3000:3000" ]
     restart: unless-stopped
+    stop_grace_period: 30s
+    networks: [ cm-network ]
+    deploy: { resources: { limits: { memory: 512M } } }
 
   content-parser:
-    build:
-      context: .
-      dockerfile: apps/content-parser/Dockerfile
-    env_file:
-      - .env
+    build: { context: ., dockerfile: apps/content-parser/Dockerfile }
+    container_name: cm-content-parser
+    env_file: [ .env ]
     environment:
+      - PORT=3001
       - REDIS_URL=redis://redis:6379
-      - REDIS_PREFIX=dev
-    depends_on:
-      redis:
-        condition: service_healthy
-    ports:
-      - "3001:3001"
+    depends_on: { redis: { condition: service_healthy } }
+    ports: [ "3001:3001" ]
     restart: unless-stopped
+    stop_grace_period: 30s
+    networks: [ cm-network ]
+    deploy: { resources: { limits: { memory: 512M } } }
 
   ai-service:
-    build:
-      context: .
-      dockerfile: apps/ai-service/Dockerfile
-    env_file:
-      - .env
+    build: { context: ., dockerfile: apps/ai-service/Dockerfile }
+    container_name: cm-ai-service
+    env_file: [ .env ]
     environment:
-      - NODE_ENV=production
       - PORT=3002
       - REDIS_URL=redis://redis:6379
-      - REDIS_PREFIX=dev
+      - NODE_ENV=production
       - AI_PROCESSING_QUEUE=ai_processing
       - XAI_API_KEY=${XAI_API_KEY:-}
-    depends_on:
-      redis:
-        condition: service_healthy
-    ports:
-      - "3002:3002"
+    depends_on: { redis: { condition: service_healthy } }
+    ports: [ "3002:3002" ]
     restart: unless-stopped
+    stop_grace_period: 30s
+    networks: [ cm-network ]
+    deploy: { resources: { limits: { memory: 512M } } }
+
+networks:
+  cm-network:
+    driver: bridge
+
+volumes:
+  redis-data:

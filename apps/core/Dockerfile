@@ -1,28 +1,31 @@
 FROM node:22-alpine AS base
+RUN apk add --no-cache python3 make g++ dumb-init
 WORKDIR /app
-ENV npm_config_optional=false
-RUN apk add --no-cache python3 make g++
 
-# Install all dependencies (including dev) for building
 FROM base AS deps
 COPY package*.json ./
 RUN npm ci
 
-# Build the core app
 FROM deps AS build
 COPY . .
 RUN npx nest build core
 
-# Runtime image with production deps only
-FROM base AS runner
+FROM node:22-alpine AS prod-deps
+WORKDIR /app
+COPY package*.json ./
+RUN apk add --no-cache python3 make g++ \
+  && npm ci --omit=dev \
+  && npm cache clean --force
+
+FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-
-COPY package*.json ./
-RUN npm ci --omit=dev
-
-# Copy compiled output
-COPY --from=build /app/dist ./dist
-
+RUN apk add --no-cache dumb-init
+USER node
+COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist/apps/core ./dist/apps/core
 EXPOSE 3000
-CMD ["node", "dist/apps/core/apps/core/src/main.js"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD node -e "require('http').get('http://127.0.0.1:3000/health', (r)=>{process.exit(r.statusCode===200?0:1)})" || exit 1
+ENTRYPOINT ["/usr/bin/dumb-init","--"]
+CMD ["node","dist/apps/core/main.js"]

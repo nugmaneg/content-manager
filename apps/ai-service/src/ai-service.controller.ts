@@ -17,6 +17,11 @@ export class AiServiceController {
     return this.aiServiceService.getHello();
   }
 
+  @Get('health')
+  health() {
+    return 'OK';
+  }
+
   @Post('test/generate')
   async generateText(@Body() body: GenerateTextPayload) {
     return this.aiServiceService.enqueueGenerateText(body);

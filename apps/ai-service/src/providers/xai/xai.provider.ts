@@ -63,11 +63,7 @@ export class XAiProvider implements AiProvider {
     }
 
     async generateEmbedding(text: string): Promise<number[]> {
-        // xAI currently might not have a public embedding endpoint compatible or supported in the SDK yet.
-        try {
-            this.logger.warn('Embedding generation requested. Verifying xAI support...');
-        } catch (error) {
-            throw error;
-        }
+        this.logger.warn('Embedding generation requested, but not implemented for xAI yet.');
+        throw new Error('Embedding generation not implemented for xAI provider');
     }
 }

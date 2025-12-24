@@ -9,4 +9,9 @@ export class CoreController {
   getHello(): string {
     return this.coreService.getHello();
   }
+
+  @Get('health')
+  health() {
+    return 'OK';
+  }
 }
