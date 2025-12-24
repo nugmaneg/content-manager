@@ -39,46 +39,66 @@ export class XAiProvider implements AiProvider {
 
     async analyzeText(text: string): Promise<AiAnalysisResult> {
         try {
-            // Using native xAI search capability via searchParameters.
-            // This allows the model to access the internet for fact-checking without manual tool management.
+            // Chat completions with response_format=json_schema to get strict JSON.
+            const analysisSchema = z.object({
+                summary: z.string().describe('Краткое содержание новости на русском языке'),
+                sentiment: z.enum(['positive', 'neutral', 'negative', 'unknown']).describe('Эмоциональный окрас текста'),
+                keywords: z.array(z.string()).describe('Список ключевых слов'),
+                entities: z.object({
+                    organizations: z.array(z.string()).optional().describe('Упомянутые организации'),
+                    people: z.array(z.string()).optional().describe('Упомянутые люди'),
+                    tickers: z.array(z.string()).optional().describe('Биржевые тикеры (BTC, TON и т.д.)'),
+                    locations: z.array(z.string()).optional().describe('Географические локации'),
+                }).optional().describe('Извлеченные сущности (NER)'),
+                category: z.string().optional().describe('Категория контента'),
+                language: z.string().optional().describe('Язык оригинала (ISO код)'),
+                factCheck: z.object({
+                    verdict: z.enum(['verified', 'partially_true', 'false', 'unverified', 'opinion']).describe('Вердикт факт-чекинга'),
+                    score: z.number().min(0).max(1).describe('Оценка достоверности (0-1)'),
+                    explanation: z.string().describe('Объяснение вердикта на русском языке'),
+                    sources: z.array(z.string()).optional().describe('Список ссылок (URL) на источники, использованные для проверки'),
+                }).optional().describe('Результаты факт-чекинга'),
+            });
+
+            // use chat completions + Output.object to get strict JSON via response_format=json_schema
             const { output } = await generateText({
                 model: this.xai('grok-4-1-fast-reasoning'),
                 output: Output.object({
-                    schema: z.object({
-                        summary: z.string().describe('Краткое содержание текста на русском языке'),
-                        sentiment: z.enum(['positive', 'neutral', 'negative', 'unknown']).describe('Эмоциональный окрас текста'),
-                        keywords: z.array(z.string()).describe('Список ключевых слов'),
-                        entities: z.object({
-                            organizations: z.array(z.string()).optional().describe('Упомянутые организации'),
-                            people: z.array(z.string()).optional().describe('Упомянутые люди'),
-                            tickers: z.array(z.string()).optional().describe('Биржевые тикеры (BTC, TON и т.д.)'),
-                            locations: z.array(z.string()).optional().describe('Географические локации'),
-                        }).optional().describe('Извлеченные сущности (NER)'),
-                        category: z.string().optional().describe('Категория контента'),
-                        language: z.string().optional().describe('Язык оригинала (ISO код)'),
-                        factCheck: z.object({
-                            verdict: z.enum(['verified', 'partially_true', 'false', 'unverified', 'opinion']).describe('Вердикт факт-чекинга'),
-                            score: z.number().min(0).max(1).describe('Оценка достоверности (0-1)'),
-                            explanation: z.string().describe('Объяснение вердикта на русском языке'),
-                        }).optional().describe('Результаты факт-чекинга'),
-                    }),
+                    schema: analysisSchema,
                 }),
                 providerOptions: {
                     xai: {
-                        searchParameters: { mode: 'auto' },
+                        // allow model to decide when to search; xAI will fetch citations when needed
+                        searchParameters: {
+                            mode: 'auto',
+                            returnCitations: true,
+                            maxSearchResults: 8,
+                        },
                     },
                 },
-                system: `Ты — профессиональный аналитик контента из Telegram. 
-                Твоя задача — проводить глубокий анализ сообщений.
-                Всегда делай краткое резюме (summary) на РУССКОМ ЯЗЫКЕ, независимо от языка оригинала.
-                Извлекай все значимые сущности (имена, компании, тикеры активов).
-                Проводи факт-чекинг: оценивай достоверность утверждений.
-                ИСПОЛЬЗУЙ ДОСТУП В ИНТЕРНЕТ (Live Search) для проверки сомнительных фактов, свежих новостей или данных, которые требуют уточнения.
-                Выявляй потенциальную дезинформацию или манипуляции.`,
+                onStepFinish: step => {
+                    this.logger.debug(
+                        `xAI step: ${JSON.stringify(
+                            {
+                                text: step.text?.slice(0, 300),
+                                reasoning: step.reasoning?.slice(0, 300),
+                                toolCalls: step.toolCalls,
+                                toolResults: step.toolResults,
+                                sources: step.sources,
+                            },
+                        )}`,
+                    );
+                },
+                system: `Ты — аналитик Telegram. Всегда возвращай ТОЛЬКО JSON по схеме, без Markdown и лишних ключей.
+                Делай краткое резюме (summary) на русском, не более 3 предложений, независимо от языка оригинала.
+                Извлекай сущности (имена, компании, тикеры, локации), keywords — 5-10 слов, строчные.
+                Если в тексте есть проверяемые факты (даты, события, цены, заявления) — ОБЯЗАТЕЛЬНО вызови webSearch. Если фактов нет, ставь factCheck.verdict='unverified' и sources=[].
+                Источники в factCheck.sources — только реальные ссылки из результатов webSearch (citations); не выдумывай. Если поиск вернул ссылки — ОБЯЗАТЕЛЬНО включи их в factCheck.sources.
+                language — ISO-код языка исходного текста.`,
                 prompt: `Проанализируй следующий текст:\n\n${text}`,
             });
 
-            return output as any as AiAnalysisResult;
+            return output as AiAnalysisResult;
         } catch (error) {
             this.logger.error('Error analyzing text with xAI (structured)', error);
             return {

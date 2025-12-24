@@ -41,6 +41,7 @@ export interface AiAnalysisResult {
         verdict: 'verified' | 'partially_true' | 'false' | 'unverified' | 'opinion';
         score: number;
         explanation: string;
+        sources?: string[];
     };
     [key: string]: any;
 }
