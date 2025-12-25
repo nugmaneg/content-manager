@@ -26,6 +26,8 @@ services:
       - REDIS_URL=redis://redis:6379
     depends_on: { redis: { condition: service_healthy } }
     ports: [ "3000:3000" ]
+    volumes:
+      - ./logs/core:/app/logs
     restart: unless-stopped
     stop_grace_period: 30s
     networks: [ cm-network ]
@@ -40,6 +42,8 @@ services:
       - REDIS_URL=redis://redis:6379
     depends_on: { redis: { condition: service_healthy } }
     ports: [ "3001:3001" ]
+    volumes:
+      - ./logs/content-parser:/app/logs
     restart: unless-stopped
     stop_grace_period: 30s
     networks: [ cm-network ]
@@ -57,6 +61,8 @@ services:
       - XAI_API_KEY=${XAI_API_KEY:-}
     depends_on: { redis: { condition: service_healthy } }
     ports: [ "3002:3002" ]
+    volumes:
+      - ./logs/ai-service:/app/logs
     restart: unless-stopped
     stop_grace_period: 30s
     networks: [ cm-network ]

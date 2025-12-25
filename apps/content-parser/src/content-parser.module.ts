@@ -1,9 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ContentParserController } from './content-parser.controller';
 import { ContentParserService } from './content-parser.service';
 import { SourcesModule } from './sources/sources.module';
 import { QueuesModule } from './queues/queues.module';
+import { LoggerMiddleware } from '@logger';
 
 @Module({
   imports: [
@@ -14,4 +15,8 @@ import { QueuesModule } from './queues/queues.module';
   controllers: [ContentParserController],
   providers: [ContentParserService],
 })
-export class ContentParserModule {}
+export class ContentParserModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(LoggerMiddleware).forRoutes('*');
+  }
+}

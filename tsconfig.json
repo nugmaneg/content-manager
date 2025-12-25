@@ -20,6 +20,12 @@
     "paths": {
       "@queue-contracts/*": [
         "libs/queue-contracts/src/*"
+      ],
+      "@logger/*": [
+        "libs/logger/src/*"
+      ],
+      "@logger": [
+        "libs/logger/src/index"
       ]
     }
   }

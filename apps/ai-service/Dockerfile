@@ -21,6 +21,7 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 RUN apk add --no-cache dumb-init
+RUN mkdir -p /app/logs && chown -R node:node /app/logs
 USER node
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist/apps/ai-service ./dist/apps/ai-service
