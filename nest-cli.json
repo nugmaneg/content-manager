@@ -30,6 +30,15 @@
       "compilerOptions": {
         "tsConfigPath": "apps/core/tsconfig.app.json"
       }
+    },
+    "database": {
+      "type": "application",
+      "root": "apps/database",
+      "entryFile": "main",
+      "sourceRoot": "apps/database/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/database/tsconfig.app.json"
+      }
     }
   }
 }

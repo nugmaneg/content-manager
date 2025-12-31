@@ -1,0 +1,699 @@
+// Prisma Schema for Content Manager
+// Based on DATABASE_ARCHITECTURE.md
+// https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===========================================
+// CONTENT LAYER - Источники и контент
+// ===========================================
+
+model Source {
+  id         String  @id @default(uuid())
+  type       String  // 'telegram', 'twitter', 'rss', etc.
+  externalId String  // channel username, feed URL, etc.
+
+  // Общие поля
+  name        String?
+  description String?
+  avatarUrl   String?
+  language    String?
+  url         String?
+
+  metadata   Json?
+  isActive   Boolean   @default(true)
+  lastSyncAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contents                  Content[]
+  workspaceDonors           WorkspaceDonor[]
+  integrationAccountSources IntegrationAccountSource[]
+
+  @@unique([type, externalId])
+  @@index([type])
+  @@index([language])
+}
+
+// Связь: какие аккаунты могут парсить какие источники
+model IntegrationAccountSource {
+  accountId String
+  sourceId  String
+
+  account IntegrationAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  source  Source             @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  isExclusive Boolean  @default(false) // Только этот аккаунт может парсить (закрытый канал)
+  priority    Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@id([accountId, sourceId])
+  @@index([sourceId])
+}
+
+model Content {
+  id         String @id @default(uuid())
+  externalId String // Обязательный! Message ID from source (for deduplication)
+
+  text    String?
+  rawData Json?
+
+  sourceId String
+  source   Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  // Через какой аккаунт получен
+  receivedViaId String?
+  receivedVia   IntegrationAccount? @relation("ContentReceivedVia", fields: [receivedViaId], references: [id])
+
+  status ContentStatus @default(pending)
+
+  // Векторное хранилище
+  qdrantId       String?  @unique
+  isVectorized   Boolean  @default(false)
+  embeddingModel String?
+
+  aiAnalysis Json?
+
+  sourceDate DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  media         Media[]
+  contentTopics ContentTopic[]
+
+  @@unique([sourceId, externalId])
+  @@index([sourceId])
+  @@index([status])
+  @@index([isVectorized])
+  @@index([createdAt])
+}
+
+enum ContentStatus {
+  pending
+  parsing
+  parsed
+  ai_analyzing
+  ai_analyzed
+  vectorizing
+  ready
+  error
+}
+
+model Media {
+  id        String  @id @default(uuid())
+  contentId String
+  content   Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  type       MediaType
+  url        String
+  mimeType   String?
+  size       Int?
+  metadata   Json?
+  aiAnalysis Json?
+  qdrantId   String?   @unique
+
+  createdAt DateTime @default(now())
+
+  @@index([contentId])
+  @@index([type])
+}
+
+enum MediaType {
+  image
+  video
+  audio
+  document
+}
+
+// ===========================================
+// TOPIC LAYER - Агрегация контента
+// ===========================================
+
+model Topic {
+  id   String    @id @default(uuid())
+  type TopicType
+
+  title    String
+  summary  String?
+  language String  @default("ru") // Язык контента топика
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id])
+
+  eventDate DateTime?
+
+  qdrantId       String? @unique
+  embeddingModel String?
+
+  version       Int      @default(1)
+  lastUpdatedAt DateTime @default(now())
+
+  expiresAt      DateTime?
+  relevanceScore Float     @default(1.0)
+  isExpired      Boolean   @default(false)
+
+  firstSeenAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  contentTopics   ContentTopic[]
+  topicTags       TopicTag[]
+  workspaceTopics WorkspaceTopic[]
+  parentRelations TopicRelation[]  @relation("TopicParent")
+  childRelations  TopicRelation[]  @relation("TopicChild")
+
+  @@index([type])
+  @@index([categoryId])
+  @@index([createdAt])
+  @@index([isExpired])
+  @@index([language])
+}
+
+enum TopicType {
+  news
+  opinion
+  rumor
+  guide
+  review
+  digest
+  announcement
+  quote
+  other
+}
+
+model ContentTopic {
+  id        String @id @default(uuid())
+  contentId String
+  topicId   String
+
+  content Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  topic   Topic   @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  isPrimary Boolean  @default(false)
+  addedAt   DateTime @default(now())
+
+  @@unique([contentId, topicId])
+  @@index([topicId])
+}
+
+model TopicRelation {
+  id String @id @default(uuid())
+
+  parentTopicId String
+  childTopicId  String
+
+  parentTopic Topic @relation("TopicParent", fields: [parentTopicId], references: [id], onDelete: Cascade)
+  childTopic  Topic @relation("TopicChild", fields: [childTopicId], references: [id], onDelete: Cascade)
+
+  relationType RelationType
+  confidence   Float?
+
+  createdAt DateTime @default(now())
+
+  @@unique([parentTopicId, childTopicId])
+  @@index([parentTopicId])
+  @@index([childTopicId])
+}
+
+enum RelationType {
+  FOLLOW_UP
+  RELATED
+  CONTRADICTS
+  UPDATE
+}
+
+// ===========================================
+// CLASSIFICATION - Категории и теги
+// ===========================================
+
+model Category {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  slug        String  @unique
+  description String?
+
+  parentId String?
+  parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryHierarchy")
+
+  createdAt DateTime @default(now())
+
+  topics           Topic[]
+  targetCategories TargetCategory[]
+
+  @@index([parentId])
+}
+
+model Tag {
+  id         String @id @default(uuid())
+  name       String @unique
+  slug       String @unique
+  usageCount Int    @default(0)
+
+  createdAt DateTime @default(now())
+
+  topicTags  TopicTag[]
+  targetTags TargetTag[]
+
+  @@index([usageCount])
+}
+
+model TopicTag {
+  id      String @id @default(uuid())
+  topicId String
+  tagId   String
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([topicId, tagId])
+  @@index([tagId])
+}
+
+// ===========================================
+// AI LAYER - Агенты ИИ и логирование
+// ===========================================
+
+model AiAgent {
+  id        String @id @default(uuid())
+  name      String
+  role      AiRole
+  modelName String
+
+  systemPrompt String
+  temperature  Float @default(0.7)
+  settings     Json?
+
+  isActive Boolean @default(true)
+
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  aiLogs AiLog[]
+}
+
+enum AiRole {
+  CLASSIFIER
+  SUMMARIZER
+  POST_MAKER
+  MEDIA_ANALYST
+  TRANSLATOR
+}
+
+model AiLog {
+  id String @id @default(uuid())
+
+  agentId String?
+  agent   AiAgent? @relation(fields: [agentId], references: [id])
+
+  // Что обрабатывали
+  resourceType String // "CONTENT", "TOPIC", "MEDIA"
+  resourceId   String
+
+  // Запрос/ответ
+  prompt   String? @db.Text
+  response String? @db.Text
+
+  // Метрики
+  inputTokens  Int?
+  outputTokens Int?
+  latencyMs    Int?
+  cost         Float? // В долларах
+
+  // Результат
+  success Boolean
+  error   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([agentId])
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+}
+
+// ===========================================
+// WORKSPACE LAYER - Пользователи и воркспейсы
+// ===========================================
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  isActive     Boolean  @default(true)
+  role         UserRole @default(USER)
+
+  telegramId       String? @unique
+  telegramUsername String?
+  avatarUrl        String?
+  settings         Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspaces          Workspace[]
+  workspaceUsers      WorkspaceUser[]
+  integrationAccounts IntegrationAccount[]
+  auditLogs           AuditLog[]
+}
+
+enum UserRole {
+  FATHER
+  ADMIN
+  USER
+  EDITOR
+}
+
+model Workspace {
+  id      String @id @default(uuid())
+  name    String
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id])
+
+  settings Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  donors   WorkspaceDonor[]
+  targets  Target[]
+  topics   WorkspaceTopic[]
+  aiAgents AiAgent[]
+  users    WorkspaceUser[]
+}
+
+model WorkspaceUser {
+  id          String @id @default(uuid())
+  workspaceId String
+  userId      String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role WorkspaceRole @default(VIEWER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+enum WorkspaceRole {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+model WorkspaceDonor {
+  id          String @id @default(uuid())
+  workspaceId String
+  sourceId    String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  source    Source    @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  isActive  Boolean  @default(true)
+  settings  Json?
+  createdAt DateTime @default(now())
+
+  @@unique([workspaceId, sourceId])
+  @@index([sourceId])
+}
+
+// ===========================================
+// PUBLICATION LAYER - Публикация контента
+// ===========================================
+
+model Target {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  type        String
+  externalId  String
+  name        String?
+  description String?
+
+  language        String @default("ru")
+  timezone        String @default("UTC")
+  maxPostsPerDay  Int?
+  minPostInterval Int?
+
+  settings     Json?
+  workSchedule Json?
+
+  accountId String?
+  account   IntegrationAccount? @relation(fields: [accountId], references: [id])
+
+  isActive Boolean @default(true)
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  publications     Publication[]
+  targetCategories TargetCategory[]
+  targetTags       TargetTag[]
+
+  @@unique([type, externalId])
+  @@index([workspaceId])
+  @@index([accountId])
+}
+
+model TargetCategory {
+  targetId   String
+  categoryId String
+
+  target   Target   @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([targetId, categoryId])
+}
+
+model TargetTag {
+  targetId String
+  tagId    String
+
+  target Target @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([targetId, tagId])
+}
+
+model WorkspaceTopic {
+  id          String @id @default(uuid())
+  workspaceId String
+  topicId     String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  topic     Topic     @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  status   WorkspaceTopicStatus @default(pending)
+  priority Int                  @default(5)
+
+  publishedVersion Int?
+  hasUpdates       Boolean @default(false)
+  lastSeenVersion  Int?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  publications Publication[]
+
+  @@unique([workspaceId, topicId])
+  @@index([topicId])
+  @@index([status])
+}
+
+enum WorkspaceTopicStatus {
+  pending
+  approved
+  skipped
+  archived
+}
+
+model Publication {
+  id               String         @id @default(uuid())
+  workspaceTopicId String
+  workspaceTopic   WorkspaceTopic @relation(fields: [workspaceTopicId], references: [id], onDelete: Cascade)
+
+  targetId String
+  target   Target @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
+  status PublicationStatus @default(PENDING)
+
+  // Версия топика на момент публикации
+  topicVersion Int
+
+  scheduledAt DateTime? // null пока статус PENDING
+  publishedAt DateTime?
+
+  externalId String?
+  error      String?
+
+  retryCount  Int       @default(0)
+  maxRetries  Int       @default(3)
+  nextRetryAt DateTime?
+
+  contentOverride Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stats PublicationStats?
+
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([targetId])
+  @@index([nextRetryAt])
+}
+
+enum PublicationStatus {
+  PENDING
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  CANCELLED
+}
+
+model PublicationStats {
+  id            String      @id @default(uuid())
+  publicationId String      @unique
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+
+  views     Int @default(0)
+  reactions Int @default(0)
+  shares    Int @default(0)
+  comments  Int @default(0)
+  clicks    Int @default(0)
+
+  history Json?
+
+  updatedAt DateTime @updatedAt
+}
+
+// ===========================================
+// INFRASTRUCTURE LAYER - Аккаунты, прокси, логи
+// ===========================================
+
+model IntegrationAccount {
+  id       String       @id @default(uuid())
+  platform PlatformType
+  type     AccountType
+
+  name       String?
+  login      String?
+  externalId String?
+
+  credentials   Json
+  metadata      Json?
+  isActive      Boolean       @default(true)
+  status        AccountStatus @default(ACTIVE)
+  statusDetails String?
+
+  lastUsedAt DateTime?
+  usageCount Int       @default(0)
+
+  proxyId String?
+  proxy   Proxy?  @relation(fields: [proxyId], references: [id])
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id])
+
+  workspaceId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  integrationAccountSources IntegrationAccountSource[]
+  targets                   Target[]
+  contents                  Content[]                  @relation("ContentReceivedVia")
+
+  @@index([platform, type])
+  @@index([status])
+  @@index([ownerId])
+}
+
+enum PlatformType {
+  TELEGRAM
+  TWITTER
+  RSS
+  YOUTUBE
+  TIKTOK
+}
+
+enum AccountType {
+  BOT
+  USER
+}
+
+enum AccountStatus {
+  ACTIVE
+  BANNED
+  FLOOD
+  AUTH_NEEDED
+  ERROR
+}
+
+model Proxy {
+  id       String @id @default(uuid())
+  protocol String
+  host     String
+  port     Int
+  username String?
+  password String?
+
+  isActive   Boolean     @default(true)
+  status     ProxyStatus @default(HEALTHY)
+  lastUsedAt DateTime?
+  errorCount Int         @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accounts IntegrationAccount[]
+}
+
+enum ProxyStatus {
+  HEALTHY
+  DEAD
+  SLOW
+}
+
+model AuditLog {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  action       String
+  resourceType String
+  resourceId   String?
+
+  oldData Json?
+  newData Json?
+
+  ip        String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([resourceType, resourceId])
+}

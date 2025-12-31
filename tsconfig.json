@@ -18,14 +18,14 @@
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
     "paths": {
-      "@queue-contracts/*": [
-        "libs/queue-contracts/src/*"
+      "@logger": [
+        "libs/logger/src/index"
       ],
       "@logger/*": [
         "libs/logger/src/*"
       ],
-      "@logger": [
-        "libs/logger/src/index"
+      "@queue-contracts/*": [
+        "libs/queue-contracts/src/*"
       ]
     }
   }

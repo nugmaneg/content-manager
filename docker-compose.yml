@@ -1,6 +1,9 @@
 version: "3.8"
 
 services:
+  # ===========================================
+  # INFRASTRUCTURE
+  # ===========================================
   redis:
     image: redis:7-alpine
     container_name: cm-redis
@@ -17,6 +20,64 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 
+  postgresql:
+    image: postgres:16-alpine
+    container_name: cm-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin_password}
+      POSTGRES_DB: ${POSTGRES_DB:-content_manager}
+    ports: [ "5432:5432" ]
+    volumes: [ postgres-data:/var/lib/postgresql/data ]
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-content_manager}" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [ cm-network ]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: cm-qdrant
+    restart: always
+    ports:
+      - "6333:6333" # REST API
+      - "6334:6334" # gRPC
+    volumes: [ qdrant-data:/qdrant/storage ]
+    networks: [ cm-network ]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # ===========================================
+  # MICROSERVICES
+  # ===========================================
+  database:
+    build: { context: ., dockerfile: apps/database/Dockerfile }
+    container_name: cm-database
+    env_file: [ .env ]
+    environment:
+      - DATABASE_SERVICE_PORT=3003
+      - DATABASE_GRPC_PORT=50051
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-admin_password}@postgresql:5432/${POSTGRES_DB:-content_manager}?schema=public
+      - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis: { condition: service_healthy }
+      postgresql: { condition: service_healthy }
+    ports:
+      - "3003:3003" # HTTP (health checks)
+      - "50051:50051" # gRPC
+    volumes: [ ./logs/database:/app/logs ]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    networks: [ cm-network ]
+    deploy: { resources: { limits: { memory: 512M } } }
+
   core:
     build: { context: ., dockerfile: apps/core/Dockerfile }
     container_name: cm-core
@@ -26,8 +87,7 @@ services:
       - REDIS_URL=redis://redis:6379
     depends_on: { redis: { condition: service_healthy } }
     ports: [ "3000:3000" ]
-    volumes:
-      - ./logs/core:/app/logs
+    volumes: [ ./logs/core:/app/logs ]
     restart: unless-stopped
     stop_grace_period: 30s
     networks: [ cm-network ]
@@ -42,8 +102,7 @@ services:
       - REDIS_URL=redis://redis:6379
     depends_on: { redis: { condition: service_healthy } }
     ports: [ "3001:3001" ]
-    volumes:
-      - ./logs/content-parser:/app/logs
+    volumes: [ ./logs/content-parser:/app/logs ]
     restart: unless-stopped
     stop_grace_period: 30s
     networks: [ cm-network ]
@@ -61,8 +120,7 @@ services:
       - XAI_API_KEY=${XAI_API_KEY:-}
     depends_on: { redis: { condition: service_healthy } }
     ports: [ "3002:3002" ]
-    volumes:
-      - ./logs/ai-service:/app/logs
+    volumes: [ ./logs/ai-service:/app/logs ]
     restart: unless-stopped
     stop_grace_period: 30s
     networks: [ cm-network ]
@@ -74,3 +132,5 @@ networks:
 
 volumes:
   redis-data:
+  postgres-data:
+  qdrant-data:

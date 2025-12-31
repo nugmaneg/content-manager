@@ -1,0 +1,265 @@
+syntax = "proto3";
+
+package database;
+
+// ===========================================
+// DATABASE SERVICE - gRPC API
+// ===========================================
+
+service DatabaseService {
+  // === CONTENT ===
+  rpc GetContent (GetContentRequest) returns (ContentResponse);
+  rpc ListContent (ListContentRequest) returns (ListContentResponse);
+  rpc CreateContent (CreateContentRequest) returns (ContentResponse);
+  rpc UpdateContent (UpdateContentRequest) returns (ContentResponse);
+
+  // === SOURCE ===
+  rpc GetSource (GetSourceRequest) returns (SourceResponse);
+  rpc ListSources (ListSourcesRequest) returns (ListSourcesResponse);
+
+  // === TOPIC ===
+  rpc GetTopic (GetTopicRequest) returns (TopicResponse);
+  rpc ListTopics (ListTopicsRequest) returns (ListTopicsResponse);
+  rpc CreateTopic (CreateTopicRequest) returns (TopicResponse);
+  rpc UpdateTopic (UpdateTopicRequest) returns (TopicResponse);
+  rpc AddContentToTopic (AddContentToTopicRequest) returns (TopicResponse);
+
+  // === PUBLICATION ===
+  rpc GetPublication (GetPublicationRequest) returns (PublicationResponse);
+  rpc ListPublications (ListPublicationsRequest) returns (ListPublicationsResponse);
+  rpc UpdatePublicationStatus (UpdatePublicationStatusRequest) returns (PublicationResponse);
+
+  // === AI LOGS ===
+  rpc CreateAiLog (CreateAiLogRequest) returns (AiLogResponse);
+
+  // === SEARCH (Vector) ===
+  rpc SearchSimilarContent (SearchSimilarRequest) returns (SearchSimilarResponse);
+  rpc SearchSimilarTopics (SearchSimilarRequest) returns (SearchSimilarResponse);
+}
+
+// ===========================================
+// REQUESTS & RESPONSES
+// ===========================================
+
+// --- CONTENT ---
+
+message ContentResponse {
+  string id = 1;
+  string external_id = 2;
+  string text = 3;
+  string source_id = 4;
+  string received_via_id = 5;
+  string qdrant_id = 6;
+  bool is_vectorized = 7;
+  string embedding_model = 8;
+  string created_at = 9;
+  string updated_at = 10;
+  string raw_data_json = 11;
+  string ai_analysis_json = 12;
+}
+
+message GetContentRequest {
+  string id = 1;
+}
+
+message ListContentRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+  string source_id = 3;
+  string status = 4; // 'pending', 'parsed', etc.
+}
+
+message ListContentResponse {
+  repeated ContentResponse items = 1;
+  int32 total = 2;
+}
+
+message CreateContentRequest {
+  string external_id = 1;
+  string source_id = 2;
+  string text = 3;
+  string raw_data_json = 4;
+  string received_via_id = 5;
+  string source_date = 6;
+}
+
+message UpdateContentRequest {
+  string id = 1;
+  string text = 2;
+  bool is_vectorized = 3;
+  string qdrant_id = 4;
+  string embedding_model = 5;
+  string ai_analysis_json = 6;
+  string status = 7;
+}
+
+// --- SOURCE ---
+
+message SourceResponse {
+  string id = 1;
+  string type = 2;
+  string external_id = 3;
+  string name = 4;
+  bool is_active = 5;
+  string language = 6;
+  string created_at = 7;
+}
+
+message GetSourceRequest {
+  string id = 1;
+}
+
+message ListSourcesRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+  string type = 3;
+}
+
+message ListSourcesResponse {
+  repeated SourceResponse items = 1;
+  int32 total = 2;
+}
+
+// --- TOPIC ---
+
+message TopicResponse {
+  string id = 1;
+  string type = 2;
+  string title = 3;
+  string summary = 4;
+  string language = 5;
+  string category_id = 6;
+  int32 version = 7;
+  double relevance_score = 8;
+  bool is_expired = 9;
+  string created_at = 10;
+  string updated_at = 11;
+}
+
+message GetTopicRequest {
+  string id = 1;
+}
+
+message ListTopicsRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+  string type = 3;
+  string category_id = 4;
+  bool only_active = 5; // if true, excludes expired
+}
+
+message ListTopicsResponse {
+  repeated TopicResponse items = 1;
+  int32 total = 2;
+}
+
+message CreateTopicRequest {
+  string type = 1;
+  string title = 2;
+  string summary = 3;
+  string language = 4;
+  string category_id = 5;
+  string embedding_model = 6;
+  string qdrant_id = 7;
+}
+
+message UpdateTopicRequest {
+  string id = 1;
+  string title = 2;
+  string summary = 3;
+  int32 version = 4;
+  double relevance_score = 5;
+  bool is_expired = 6;
+  string embedding_model = 7;
+  string qdrant_id = 8;
+  string qdrant_id_to_null = 9; // Special flag to clear qdrant_id
+}
+
+message AddContentToTopicRequest {
+  string topic_id = 1;
+  string content_id = 2;
+  bool is_primary = 3;
+}
+
+// --- PUBLICATION ---
+
+message PublicationResponse {
+  string id = 1;
+  string workspace_topic_id = 2;
+  string target_id = 3;
+  string status = 4;
+  int32 topic_version = 5;
+  string scheduled_at = 6;
+  string published_at = 7;
+  string external_id = 8;
+  string error = 9;
+  int32 retry_count = 10;
+  string next_retry_at = 11;
+  string created_at = 12;
+}
+
+message GetPublicationRequest {
+  string id = 1;
+}
+
+message ListPublicationsRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+  string status = 3;
+  string target_id = 4;
+  bool only_due = 5; // Get only pending/scheduled that are due now
+}
+
+message ListPublicationsResponse {
+  repeated PublicationResponse items = 1;
+  int32 total = 2;
+}
+
+message UpdatePublicationStatusRequest {
+  string id = 1;
+  string status = 2;
+  string error = 3;
+  string external_id = 4;
+  string published_at = 5;
+  int32 retry_count = 6;
+  string next_retry_at = 7;
+}
+
+// --- AI LOG ---
+
+message AiLogResponse {
+  string id = 1;
+  bool success = 2;
+}
+
+message CreateAiLogRequest {
+  string agent_id = 1;
+  string resource_type = 2;
+  string resource_id = 3;
+  string prompt = 4;
+  string response = 5;
+  int32 input_tokens = 6;
+  int32 output_tokens = 7;
+  int32 latency_ms = 8;
+  double cost = 9;
+  bool success = 10;
+  string error = 11;
+}
+
+// --- SEARCH ---
+
+message SearchSimilarRequest {
+  repeated float vector = 1;
+  int32 limit = 2;
+  float min_score = 3; // 0.0 to 1.0 (e.g. 0.85)
+}
+
+message SearchResultItem {
+  string id = 1; // Content ID or Topic ID
+  string text = 2; // Preview text
+  float score = 3;
+}
+
+message SearchSimilarResponse {
+  repeated SearchResultItem items = 1;
+}
