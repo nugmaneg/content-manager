@@ -128,7 +128,7 @@ export class StorageProcessor extends WorkerHost {
         const qdrantId = content.qdrantId ?? uuidv4();
 
         // Сохраняем вектор в Qdrant
-        await this.qdrant.upsertVector(qdrantId, payload.vector, {
+        await this.qdrant.upsertVector(this.qdrant.getContentCollectionName(), qdrantId, payload.vector, {
             contentId: content.id,
             text: content.text,
         });
