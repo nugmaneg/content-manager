@@ -27,6 +27,7 @@ service DatabaseService {
   // === PUBLICATION ===
   rpc GetPublication (GetPublicationRequest) returns (PublicationResponse);
   rpc ListPublications (ListPublicationsRequest) returns (ListPublicationsResponse);
+  rpc CreatePublication (CreatePublicationRequest) returns (PublicationResponse);
   rpc UpdatePublicationStatus (UpdatePublicationStatusRequest) returns (PublicationResponse);
 
   // === AI LOGS ===
@@ -213,6 +214,14 @@ message ListPublicationsRequest {
 message ListPublicationsResponse {
   repeated PublicationResponse items = 1;
   int32 total = 2;
+}
+
+message CreatePublicationRequest {
+  string workspace_topic_id = 1;
+  string target_id = 2;
+  int32 topic_version = 3;
+  string scheduled_at = 4; // ISO string
+  string content_override_json = 5;
 }
 
 message UpdatePublicationStatusRequest {

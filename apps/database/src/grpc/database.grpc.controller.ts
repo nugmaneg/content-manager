@@ -26,6 +26,7 @@ interface AddContentToTopicRequest { topic_id: string; content_id: string; is_pr
 // Publication
 interface GetPublicationRequest { id: string; }
 interface ListPublicationsRequest { limit?: number; offset?: number; status?: string; target_id?: string; only_due?: boolean; }
+interface CreatePublicationRequest { workspace_topic_id: string; target_id: string; topic_version: number; scheduled_at?: string; content_override_json?: string; }
 interface UpdatePublicationStatusRequest { id: string; status: string; error?: string; external_id?: string; published_at?: string; retry_count?: number; next_retry_at?: string; }
 
 // AiLog
@@ -152,7 +153,7 @@ export class DatabaseGrpcController {
     @GrpcMethod('DatabaseService', 'ListTopics')
     async listTopics(data: ListTopicsRequest) {
         const where: any = {};
-        if (data.type) where.type = data.type;
+        if (data.type) where.type = data.type as any;
         if (data.category_id) where.categoryId = data.category_id;
         if (data.only_active) where.isExpired = false;
 
@@ -167,8 +168,7 @@ export class DatabaseGrpcController {
     async createTopic(data: CreateTopicRequest) {
         const topic = await this.prisma.topic.create({
             data: {
-                // @ts-ignore
-                type: data.type,
+                type: data.type as any,
                 title: data.title,
                 summary: data.summary,
                 language: data.language || 'ru',
@@ -236,10 +236,51 @@ export class DatabaseGrpcController {
         }
 
         const [items, total] = await Promise.all([
-            this.prisma.publication.findMany({ where, take: data.limit || 10, skip: data.offset || 0 }),
+            this.prisma.publication.findMany({ where, take: data.limit || 10, skip: data.offset || 0, orderBy: { createdAt: 'desc' } }),
             this.prisma.publication.count({ where })
         ]);
         return { items: items.map(this.mapPublication), total };
+    }
+
+    @GrpcMethod('DatabaseService', 'CreatePublication')
+    async createPublication(data: CreatePublicationRequest) {
+        try {
+            const pub = await this.prisma.publication.create({
+                data: {
+                    workspaceTopicId: data.workspace_topic_id,
+                    targetId: data.target_id,
+                    topicVersion: data.topic_version,
+                    scheduledAt: data.scheduled_at ? new Date(data.scheduled_at) : null,
+                    contentOverride: data.content_override_json ? JSON.parse(data.content_override_json) : undefined,
+                    status: data.scheduled_at ? 'SCHEDULED' : 'PENDING',
+                }
+            });
+            return this.mapPublication(pub);
+        } catch (e) {
+            this.logger.error(e);
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to create publication' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'UpdatePublicationStatus')
+    async updatePublicationStatus(data: UpdatePublicationStatusRequest) {
+        try {
+            const updateData: any = {};
+            if (data.status) updateData.status = data.status;
+            if (data.error !== undefined) updateData.error = data.error;
+            if (data.external_id !== undefined) updateData.externalId = data.external_id;
+            if (data.published_at) updateData.publishedAt = new Date(data.published_at);
+            if (data.retry_count !== undefined) updateData.retryCount = data.retry_count;
+            if (data.next_retry_at) updateData.nextRetryAt = new Date(data.next_retry_at);
+
+            const pub = await this.prisma.publication.update({
+                where: { id: data.id },
+                data: updateData
+            });
+            return this.mapPublication(pub);
+        } catch (e) {
+            throw new RpcException({ code: status.NOT_FOUND, message: 'Publication not found or update failed' });
+        }
     }
 
     // ===================================
@@ -276,8 +317,12 @@ export class DatabaseGrpcController {
             throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Vector required' });
         }
 
-        // Use existing method from qdrant.service
-        const results = await this.qdrant.searchSimilar(data.vector, data.limit || 10, data.min_score);
+        const results = await this.qdrant.searchSimilar(
+            this.qdrant.getContentCollectionName(),
+            data.vector,
+            data.limit || 10,
+            data.min_score
+        );
 
         return {
             items: results.map((result) => ({
@@ -288,11 +333,33 @@ export class DatabaseGrpcController {
         };
     }
 
+    @GrpcMethod('DatabaseService', 'SearchSimilarTopics')
+    async searchSimilarTopics(data: SearchSimilarRequest) {
+        if (!data.vector || data.vector.length === 0) {
+            throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Vector required' });
+        }
+
+        const results = await this.qdrant.searchSimilar(
+            this.qdrant.getTopicCollectionName(),
+            data.vector,
+            data.limit || 10,
+            data.min_score
+        );
+
+        return {
+            items: results.map((result) => ({
+                id: result.payload?.topicId as string,
+                text: result.payload?.title as string,
+                score: result.score,
+            })),
+        };
+    }
+
     // ===================================
     // HELPERS
     // ===================================
 
-    private mapContent(item: any) {
+    private mapContent = (item: any) => {
         return {
             id: item.id,
             external_id: item.externalId,
@@ -309,7 +376,7 @@ export class DatabaseGrpcController {
         };
     }
 
-    private mapSource(item: any) {
+    private mapSource = (item: any) => {
         return {
             id: item.id,
             type: item.type,
@@ -321,7 +388,7 @@ export class DatabaseGrpcController {
         };
     }
 
-    private mapTopic(item: any) {
+    private mapTopic = (item: any) => {
         return {
             id: item.id,
             type: item.type,
@@ -337,7 +404,7 @@ export class DatabaseGrpcController {
         };
     }
 
-    private mapPublication(item: any) {
+    private mapPublication = (item: any) => {
         return {
             id: item.id,
             workspace_topic_id: item.workspaceTopicId,

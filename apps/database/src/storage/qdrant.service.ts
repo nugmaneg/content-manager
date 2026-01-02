@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { QdrantClient } from '@qdrant/js-client-rest';
 
 const CONTENT_COLLECTION = 'content_vectors';
+const TOPIC_COLLECTION = 'topic_vectors';
 const VECTOR_SIZE = 1536; // OpenAI/xAI embedding size
 
 @Injectable()
@@ -15,28 +16,29 @@ export class QdrantService implements OnModuleInit {
 
         this.client = new QdrantClient({ url });
 
-        // Проверяем/создаем коллекцию для контента
-        await this.ensureCollection();
+        // Проверяем/создаем коллекции
+        await this.ensureCollection(CONTENT_COLLECTION);
+        await this.ensureCollection(TOPIC_COLLECTION);
         this.logger.log('Successfully connected to Qdrant');
     }
 
-    private async ensureCollection() {
+    private async ensureCollection(name: string) {
         try {
             const collections = await this.client.getCollections();
-            const exists = collections.collections.some(c => c.name === CONTENT_COLLECTION);
+            const exists = collections.collections.some(c => c.name === name);
 
             if (!exists) {
-                this.logger.log(`Creating collection "${CONTENT_COLLECTION}"...`);
-                await this.client.createCollection(CONTENT_COLLECTION, {
+                this.logger.log(`Creating collection "${name}"...`);
+                await this.client.createCollection(name, {
                     vectors: {
                         size: VECTOR_SIZE,
                         distance: 'Cosine',
                     },
                 });
-                this.logger.log(`Collection "${CONTENT_COLLECTION}" created`);
+                this.logger.log(`Collection "${name}" created`);
             }
         } catch (error) {
-            this.logger.error('Failed to ensure Qdrant collection', error);
+            this.logger.error(`Failed to ensure Qdrant collection "${name}"`, error);
             throw error;
         }
     }
@@ -45,15 +47,19 @@ export class QdrantService implements OnModuleInit {
         return this.client;
     }
 
-    getCollectionName(): string {
+    getContentCollectionName(): string {
         return CONTENT_COLLECTION;
+    }
+
+    getTopicCollectionName(): string {
+        return TOPIC_COLLECTION;
     }
 
     /**
      * Сохраняет вектор в Qdrant
      */
-    async upsertVector(id: string, vector: number[], payload: Record<string, unknown>) {
-        await this.client.upsert(CONTENT_COLLECTION, {
+    async upsertVector(collectionName: string, id: string, vector: number[], payload: Record<string, unknown>) {
+        await this.client.upsert(collectionName, {
             points: [
                 {
                     id,
@@ -67,8 +73,8 @@ export class QdrantService implements OnModuleInit {
     /**
      * Поиск похожих векторов
      */
-    async searchSimilar(vector: number[], limit = 10, minScore?: number) {
-        return this.client.search(CONTENT_COLLECTION, {
+    async searchSimilar(collectionName: string, vector: number[], limit = 10, minScore?: number) {
+        return this.client.search(collectionName, {
             vector,
             limit,
             score_threshold: minScore, // Фильтр по минимальному скору
