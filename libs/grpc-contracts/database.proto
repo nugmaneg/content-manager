@@ -36,6 +36,13 @@ service DatabaseService {
   // === SEARCH (Vector) ===
   rpc SearchSimilarContent (SearchSimilarRequest) returns (SearchSimilarResponse);
   rpc SearchSimilarTopics (SearchSimilarRequest) returns (SearchSimilarResponse);
+
+  // === USER (Auth) ===
+  rpc GetUserById (GetUserByIdRequest) returns (UserResponse);
+  rpc GetUserByEmail (GetUserByEmailRequest) returns (UserResponse);
+  rpc CreateUser (CreateUserRequest) returns (UserResponse);
+  rpc UpdateUserRefreshToken (UpdateUserRefreshTokenRequest) returns (UserResponse);
+  rpc CountUsers (CountUsersRequest) returns (CountUsersResponse);
 }
 
 // ===========================================
@@ -271,4 +278,47 @@ message SearchResultItem {
 
 message SearchSimilarResponse {
   repeated SearchResultItem items = 1;
+}
+
+// --- USER (Auth) ---
+
+message UserResponse {
+  string id = 1;
+  string email = 2;
+  string name = 3;
+  string password_hash = 4;
+  bool is_active = 5;
+  string role = 6; // FATHER, ADMIN, USER, EDITOR
+  string telegram_id = 7;
+  string telegram_username = 8;
+  string avatar_url = 9;
+  string refresh_token_hash = 10;
+  string created_at = 11;
+  string updated_at = 12;
+}
+
+message GetUserByIdRequest {
+  string id = 1;
+}
+
+message GetUserByEmailRequest {
+  string email = 1;
+}
+
+message CreateUserRequest {
+  string email = 1;
+  string name = 2;
+  string password_hash = 3;
+  string role = 4; // FATHER, ADMIN, USER, EDITOR
+}
+
+message UpdateUserRefreshTokenRequest {
+  string id = 1;
+  string refresh_token_hash = 2; // empty string to clear
+}
+
+message CountUsersRequest {}
+
+message CountUsersResponse {
+  int32 count = 1;
 }

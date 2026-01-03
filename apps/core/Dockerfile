@@ -25,6 +25,7 @@ RUN mkdir -p /app/logs && chown -R node:node /app/logs
 USER node
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist/apps/core ./dist/apps/core
+COPY --from=build --chown=node:node /app/libs/grpc-contracts ./libs/grpc-contracts
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD node -e "require('http').get('http://127.0.0.1:3000/health', (r)=>{process.exit(r.statusCode===200?0:1)})" || exit 1

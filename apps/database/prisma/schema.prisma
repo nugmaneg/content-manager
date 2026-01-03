@@ -359,6 +359,7 @@ model User {
   telegramUsername String?
   avatarUrl        String?
   settings         Json?
+  refreshTokenHash String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -35,6 +35,13 @@ interface CreateAiLogRequest { agent_id?: string; resource_type: string; resourc
 // Search
 interface SearchSimilarRequest { vector: number[]; limit?: number; min_score?: number; }
 
+// User (Auth) - fields must match proto definition (snake_case)
+interface GetUserByIdRequest { id: string; }
+interface GetUserByEmailRequest { email: string; }
+interface CreateUserRequest { email: string; name?: string; password_hash: string; role?: string; }
+interface UpdateUserRefreshTokenRequest { id: string; refresh_token_hash: string; }
+interface CountUsersRequest { }
+
 @Controller()
 export class DatabaseGrpcController {
     private readonly logger = new Logger(DatabaseGrpcController.name);
@@ -356,6 +363,70 @@ export class DatabaseGrpcController {
     }
 
     // ===================================
+    // USER (Auth)
+    // ===================================
+
+    @GrpcMethod('DatabaseService', 'GetUserById')
+    async getUserById(data: GetUserByIdRequest) {
+        if (!data.id) throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'User ID required' });
+
+        const user = await this.prisma.user.findUnique({ where: { id: data.id } });
+        if (!user) throw new RpcException({ code: status.NOT_FOUND, message: 'User not found' });
+
+        return this.mapUser(user);
+    }
+
+    @GrpcMethod('DatabaseService', 'GetUserByEmail')
+    async getUserByEmail(data: GetUserByEmailRequest) {
+        if (!data.email) throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Email required' });
+
+        const user = await this.prisma.user.findUnique({ where: { email: data.email } });
+        if (!user) throw new RpcException({ code: status.NOT_FOUND, message: 'User not found' });
+
+        return this.mapUser(user);
+    }
+
+    @GrpcMethod('DatabaseService', 'CreateUser')
+    async createUser(data: CreateUserRequest) {
+        try {
+            const user = await this.prisma.user.create({
+                data: {
+                    email: data.email,
+                    name: data.name,
+                    passwordHash: data.password_hash,
+                    role: (data.role as any) || 'USER',
+                }
+            });
+            return this.mapUser(user);
+        } catch (e: any) {
+            if (e.code === 'P2002') {
+                throw new RpcException({ code: status.ALREADY_EXISTS, message: 'User with this email already exists' });
+            }
+            this.logger.error(e);
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to create user' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'UpdateUserRefreshToken')
+    async updateUserRefreshToken(data: UpdateUserRefreshTokenRequest) {
+        try {
+            const user = await this.prisma.user.update({
+                where: { id: data.id },
+                data: { refreshTokenHash: data.refresh_token_hash || null }
+            });
+            return this.mapUser(user);
+        } catch (e) {
+            throw new RpcException({ code: status.NOT_FOUND, message: 'User not found' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'CountUsers')
+    async countUsers(_data: CountUsersRequest) {
+        const count = await this.prisma.user.count();
+        return { count };
+    }
+
+    // ===================================
     // HELPERS
     // ===================================
 
@@ -418,6 +489,23 @@ export class DatabaseGrpcController {
             retry_count: item.retryCount,
             next_retry_at: item.nextRetryAt ? item.nextRetryAt.toISOString() : '',
             created_at: item.createdAt.toISOString(),
+        };
+    }
+
+    private mapUser = (item: any) => {
+        return {
+            id: item.id,
+            email: item.email,
+            name: item.name ?? '',
+            password_hash: item.passwordHash,
+            is_active: item.isActive,
+            role: item.role,
+            telegram_id: item.telegramId ?? '',
+            telegram_username: item.telegramUsername ?? '',
+            avatar_url: item.avatarUrl ?? '',
+            refresh_token_hash: item.refreshTokenHash ?? '',
+            created_at: item.createdAt.toISOString(),
+            updated_at: item.updatedAt.toISOString(),
         };
     }
 }

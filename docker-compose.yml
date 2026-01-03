@@ -85,7 +85,13 @@ services:
     environment:
       - PORT=3000
       - REDIS_URL=redis://redis:6379
-    depends_on: { redis: { condition: service_healthy } }
+      - DATABASE_GRPC_URL=database:50051
+      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-me}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-dev-refresh-secret-change-me}
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
+    depends_on:
+      redis: { condition: service_healthy }
+      database: { condition: service_started }
     ports: [ "3000:3000" ]
     volumes: [ ./logs/core:/app/logs ]
     restart: unless-stopped

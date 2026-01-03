@@ -44,6 +44,12 @@ async function bootstrap() {
             package: 'database',
             protoPath,
             url: `0.0.0.0:${grpcPort}`,
+            loader: {
+                keepCase: true,   // Keep snake_case from proto
+                defaults: true,    // Include default values (false, 0, "")
+                arrays: true,      // Always return arrays
+                objects: true,     // Always return objects
+            },
         },
     });
 
