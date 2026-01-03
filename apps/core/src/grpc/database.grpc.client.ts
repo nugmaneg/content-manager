@@ -45,13 +45,54 @@ interface CountUsersResponse {
     count: number;
 }
 
+// Workspace interfaces
+interface WorkspaceResponse {
+    id: string;
+    name: string;
+    owner_id: string;
+    settings_json: string;
+    created_at: string;
+    updated_at: string;
+}
+
+interface WorkspaceUserResponse {
+    id: string;
+    workspace_id: string;
+    user_id: string;
+    role: string;
+    user_email: string;
+    user_name: string;
+    created_at: string;
+}
+
+interface ListWorkspacesResponse {
+    workspaces: WorkspaceResponse[];
+}
+
+interface ListWorkspaceUsersResponse {
+    users: WorkspaceUserResponse[];
+}
+
 interface DatabaseService {
+    // User methods
     getUserById(data: GetUserByIdRequest): Observable<UserResponse>;
     getUserByEmail(data: GetUserByEmailRequest): Observable<UserResponse>;
     createUser(data: CreateUserRequest): Observable<UserResponse>;
     updateUserRefreshToken(data: UpdateUserRefreshTokenRequest): Observable<UserResponse>;
     countUsers(data: Record<string, never>): Observable<CountUsersResponse>;
+
+    // Workspace methods
+    getWorkspace(data: { id: string }): Observable<WorkspaceResponse>;
+    listWorkspaces(data: { user_id: string }): Observable<ListWorkspacesResponse>;
+    createWorkspace(data: { name: string; owner_id: string; settings_json?: string }): Observable<WorkspaceResponse>;
+    updateWorkspace(data: { id: string; name?: string; settings_json?: string }): Observable<WorkspaceResponse>;
+    deleteWorkspace(data: { id: string }): Observable<Record<string, never>>;
+    addWorkspaceUser(data: { workspace_id: string; user_id: string; role: string }): Observable<WorkspaceUserResponse>;
+    removeWorkspaceUser(data: { workspace_id: string; user_id: string }): Observable<Record<string, never>>;
+    listWorkspaceUsers(data: { workspace_id: string }): Observable<ListWorkspaceUsersResponse>;
 }
+
+export { WorkspaceResponse, WorkspaceUserResponse, ListWorkspacesResponse, ListWorkspaceUsersResponse };
 
 @Injectable()
 export class DatabaseGrpcClient implements OnModuleInit {
@@ -129,5 +170,63 @@ export class DatabaseGrpcClient implements OnModuleInit {
     async countUsers(): Promise<number> {
         const result = await firstValueFrom(this.databaseService.countUsers({}));
         return result.count;
+    }
+
+    // ===================================
+    // WORKSPACE METHODS
+    // ===================================
+
+    async getWorkspace(id: string): Promise<WorkspaceResponse | null> {
+        try {
+            return await firstValueFrom(this.databaseService.getWorkspace({ id }));
+        } catch (error: any) {
+            if (error.code === 5) return null;
+            throw error;
+        }
+    }
+
+    async listWorkspaces(userId: string): Promise<WorkspaceResponse[]> {
+        const result = await firstValueFrom(this.databaseService.listWorkspaces({ user_id: userId }));
+        return result.workspaces || [];
+    }
+
+    async createWorkspace(data: { name: string; ownerId: string; settings?: Record<string, any> }): Promise<WorkspaceResponse> {
+        return await firstValueFrom(this.databaseService.createWorkspace({
+            name: data.name,
+            owner_id: data.ownerId,
+            settings_json: data.settings ? JSON.stringify(data.settings) : undefined,
+        }));
+    }
+
+    async updateWorkspace(id: string, data: { name?: string; settings?: Record<string, any> }): Promise<WorkspaceResponse> {
+        return await firstValueFrom(this.databaseService.updateWorkspace({
+            id,
+            name: data.name,
+            settings_json: data.settings !== undefined ? JSON.stringify(data.settings) : undefined,
+        }));
+    }
+
+    async deleteWorkspace(id: string): Promise<void> {
+        await firstValueFrom(this.databaseService.deleteWorkspace({ id }));
+    }
+
+    async addWorkspaceUser(workspaceId: string, userId: string, role: string): Promise<WorkspaceUserResponse> {
+        return await firstValueFrom(this.databaseService.addWorkspaceUser({
+            workspace_id: workspaceId,
+            user_id: userId,
+            role,
+        }));
+    }
+
+    async removeWorkspaceUser(workspaceId: string, userId: string): Promise<void> {
+        await firstValueFrom(this.databaseService.removeWorkspaceUser({
+            workspace_id: workspaceId,
+            user_id: userId,
+        }));
+    }
+
+    async listWorkspaceUsers(workspaceId: string): Promise<WorkspaceUserResponse[]> {
+        const result = await firstValueFrom(this.databaseService.listWorkspaceUsers({ workspace_id: workspaceId }));
+        return result.users || [];
     }
 }

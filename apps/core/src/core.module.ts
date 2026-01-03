@@ -6,6 +6,7 @@ import { QueuesModule } from './queues/queues.module';
 import { TelegramQueueController } from './telegram-queue.controller';
 import { PipelineModule } from './pipeline/pipeline.module';
 import { AuthModule } from './auth';
+import { WorkspacesModule } from './workspaces';
 import { LoggerMiddleware } from '@logger';
 
 @Module({
@@ -14,6 +15,7 @@ import { LoggerMiddleware } from '@logger';
     QueuesModule,
     PipelineModule,
     AuthModule,
+    WorkspacesModule,
   ],
   controllers: [CoreController, TelegramQueueController],
   providers: [CoreService],

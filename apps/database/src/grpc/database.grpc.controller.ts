@@ -42,6 +42,16 @@ interface CreateUserRequest { email: string; name?: string; password_hash: strin
 interface UpdateUserRefreshTokenRequest { id: string; refresh_token_hash: string; }
 interface CountUsersRequest { }
 
+// Workspace
+interface GetWorkspaceRequest { id: string; }
+interface ListWorkspacesRequest { user_id: string; }
+interface CreateWorkspaceRequest { name: string; owner_id: string; settings_json?: string; }
+interface UpdateWorkspaceRequest { id: string; name?: string; settings_json?: string; }
+interface DeleteWorkspaceRequest { id: string; }
+interface AddWorkspaceUserRequest { workspace_id: string; user_id: string; role: string; }
+interface RemoveWorkspaceUserRequest { workspace_id: string; user_id: string; }
+interface ListWorkspaceUsersRequest { workspace_id: string; }
+
 @Controller()
 export class DatabaseGrpcController {
     private readonly logger = new Logger(DatabaseGrpcController.name);
@@ -427,6 +437,140 @@ export class DatabaseGrpcController {
     }
 
     // ===================================
+    // WORKSPACE
+    // ===================================
+
+    @GrpcMethod('DatabaseService', 'GetWorkspace')
+    async getWorkspace(data: GetWorkspaceRequest) {
+        if (!data.id) throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Workspace ID required' });
+
+        const workspace = await this.prisma.workspace.findUnique({ where: { id: data.id } });
+        if (!workspace) throw new RpcException({ code: status.NOT_FOUND, message: 'Workspace not found' });
+
+        return this.mapWorkspace(workspace);
+    }
+
+    @GrpcMethod('DatabaseService', 'ListWorkspaces')
+    async listWorkspaces(data: ListWorkspacesRequest) {
+        if (!data.user_id) throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'User ID required' });
+
+        // Find workspaces where user is owner OR member
+        const workspaces = await this.prisma.workspace.findMany({
+            where: {
+                OR: [
+                    { ownerId: data.user_id },
+                    { users: { some: { userId: data.user_id } } }
+                ]
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        return { workspaces: workspaces.map(this.mapWorkspace) };
+    }
+
+    @GrpcMethod('DatabaseService', 'CreateWorkspace')
+    async createWorkspace(data: CreateWorkspaceRequest) {
+        try {
+            const workspace = await this.prisma.workspace.create({
+                data: {
+                    name: data.name,
+                    ownerId: data.owner_id,
+                    settings: data.settings_json ? JSON.parse(data.settings_json) : null,
+                }
+            });
+            return this.mapWorkspace(workspace);
+        } catch (e: any) {
+            this.logger.error(e);
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to create workspace' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'UpdateWorkspace')
+    async updateWorkspace(data: UpdateWorkspaceRequest) {
+        try {
+            const updateData: any = {};
+            if (data.name) updateData.name = data.name;
+            if (data.settings_json !== undefined) {
+                updateData.settings = data.settings_json ? JSON.parse(data.settings_json) : null;
+            }
+
+            const workspace = await this.prisma.workspace.update({
+                where: { id: data.id },
+                data: updateData
+            });
+            return this.mapWorkspace(workspace);
+        } catch (e: any) {
+            if (e.code === 'P2025') {
+                throw new RpcException({ code: status.NOT_FOUND, message: 'Workspace not found' });
+            }
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to update workspace' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'DeleteWorkspace')
+    async deleteWorkspace(data: DeleteWorkspaceRequest) {
+        try {
+            await this.prisma.workspace.delete({ where: { id: data.id } });
+            return {};
+        } catch (e: any) {
+            if (e.code === 'P2025') {
+                throw new RpcException({ code: status.NOT_FOUND, message: 'Workspace not found' });
+            }
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to delete workspace' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'AddWorkspaceUser')
+    async addWorkspaceUser(data: AddWorkspaceUserRequest) {
+        try {
+            const workspaceUser = await this.prisma.workspaceUser.create({
+                data: {
+                    workspaceId: data.workspace_id,
+                    userId: data.user_id,
+                    role: data.role as any || 'VIEWER',
+                },
+                include: { user: true }
+            });
+            return this.mapWorkspaceUser(workspaceUser);
+        } catch (e: any) {
+            if (e.code === 'P2002') {
+                throw new RpcException({ code: status.ALREADY_EXISTS, message: 'User already in workspace' });
+            }
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to add user to workspace' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'RemoveWorkspaceUser')
+    async removeWorkspaceUser(data: RemoveWorkspaceUserRequest) {
+        try {
+            await this.prisma.workspaceUser.delete({
+                where: {
+                    workspaceId_userId: {
+                        workspaceId: data.workspace_id,
+                        userId: data.user_id
+                    }
+                }
+            });
+            return {};
+        } catch (e: any) {
+            if (e.code === 'P2025') {
+                throw new RpcException({ code: status.NOT_FOUND, message: 'User not in workspace' });
+            }
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to remove user from workspace' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'ListWorkspaceUsers')
+    async listWorkspaceUsers(data: ListWorkspaceUsersRequest) {
+        const users = await this.prisma.workspaceUser.findMany({
+            where: { workspaceId: data.workspace_id },
+            include: { user: true },
+            orderBy: { createdAt: 'asc' }
+        });
+        return { users: users.map(this.mapWorkspaceUser) };
+    }
+
+    // ===================================
     // HELPERS
     // ===================================
 
@@ -506,6 +650,29 @@ export class DatabaseGrpcController {
             refresh_token_hash: item.refreshTokenHash ?? '',
             created_at: item.createdAt.toISOString(),
             updated_at: item.updatedAt.toISOString(),
+        };
+    }
+
+    private mapWorkspace = (item: any) => {
+        return {
+            id: item.id,
+            name: item.name,
+            owner_id: item.ownerId,
+            settings_json: item.settings ? JSON.stringify(item.settings) : '',
+            created_at: item.createdAt.toISOString(),
+            updated_at: item.updatedAt.toISOString(),
+        };
+    }
+
+    private mapWorkspaceUser = (item: any) => {
+        return {
+            id: item.id,
+            workspace_id: item.workspaceId,
+            user_id: item.userId,
+            role: item.role,
+            user_email: item.user?.email ?? '',
+            user_name: item.user?.name ?? '',
+            created_at: item.createdAt.toISOString(),
         };
     }
 }

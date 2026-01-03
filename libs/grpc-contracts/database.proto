@@ -43,6 +43,16 @@ service DatabaseService {
   rpc CreateUser (CreateUserRequest) returns (UserResponse);
   rpc UpdateUserRefreshToken (UpdateUserRefreshTokenRequest) returns (UserResponse);
   rpc CountUsers (CountUsersRequest) returns (CountUsersResponse);
+
+  // === WORKSPACE ===
+  rpc GetWorkspace (GetWorkspaceRequest) returns (WorkspaceResponse);
+  rpc ListWorkspaces (ListWorkspacesRequest) returns (ListWorkspacesResponse);
+  rpc CreateWorkspace (CreateWorkspaceRequest) returns (WorkspaceResponse);
+  rpc UpdateWorkspace (UpdateWorkspaceRequest) returns (WorkspaceResponse);
+  rpc DeleteWorkspace (DeleteWorkspaceRequest) returns (Empty);
+  rpc AddWorkspaceUser (AddWorkspaceUserRequest) returns (WorkspaceUserResponse);
+  rpc RemoveWorkspaceUser (RemoveWorkspaceUserRequest) returns (Empty);
+  rpc ListWorkspaceUsers (ListWorkspaceUsersRequest) returns (ListWorkspaceUsersResponse);
 }
 
 // ===========================================
@@ -322,3 +332,73 @@ message CountUsersRequest {}
 message CountUsersResponse {
   int32 count = 1;
 }
+
+// --- WORKSPACE ---
+
+message WorkspaceResponse {
+  string id = 1;
+  string name = 2;
+  string owner_id = 3;
+  string settings_json = 4;
+  string created_at = 5;
+  string updated_at = 6;
+}
+
+message WorkspaceUserResponse {
+  string id = 1;
+  string workspace_id = 2;
+  string user_id = 3;
+  string role = 4; // ADMIN, EDITOR, VIEWER
+  string user_email = 5;
+  string user_name = 6;
+  string created_at = 7;
+}
+
+message GetWorkspaceRequest {
+  string id = 1;
+}
+
+message ListWorkspacesRequest {
+  string user_id = 1; // List workspaces where user is owner or member
+}
+
+message ListWorkspacesResponse {
+  repeated WorkspaceResponse workspaces = 1;
+}
+
+message CreateWorkspaceRequest {
+  string name = 1;
+  string owner_id = 2;
+  string settings_json = 3;
+}
+
+message UpdateWorkspaceRequest {
+  string id = 1;
+  string name = 2;
+  string settings_json = 3;
+}
+
+message DeleteWorkspaceRequest {
+  string id = 1;
+}
+
+message AddWorkspaceUserRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string role = 3; // ADMIN, EDITOR, VIEWER
+}
+
+message RemoveWorkspaceUserRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message ListWorkspaceUsersRequest {
+  string workspace_id = 1;
+}
+
+message ListWorkspaceUsersResponse {
+  repeated WorkspaceUserResponse users = 1;
+}
+
+message Empty {}
