@@ -15,7 +15,12 @@ service DatabaseService {
 
   // === SOURCE ===
   rpc GetSource (GetSourceRequest) returns (SourceResponse);
+  rpc GetSourceByExternalId (GetSourceByExternalIdRequest) returns (SourceResponse);
   rpc ListSources (ListSourcesRequest) returns (ListSourcesResponse);
+  rpc CreateSource (CreateSourceRequest) returns (SourceResponse);
+  rpc UpdateSource (UpdateSourceRequest) returns (SourceResponse);
+  rpc SetSourceActive (SetSourceActiveRequest) returns (SourceResponse);
+  rpc DeleteSource (DeleteSourceRequest) returns (Empty);
 
   // === TOPIC ===
   rpc GetTopic (GetTopicRequest) returns (TopicResponse);
@@ -115,27 +120,70 @@ message UpdateContentRequest {
 
 message SourceResponse {
   string id = 1;
-  string type = 2;
-  string external_id = 3;
+  string type = 2;              // telegram, twitter, rss
+  string external_id = 3;       // numeric ID for telegram
   string name = 4;
-  bool is_active = 5;
-  string language = 6;
-  string created_at = 7;
+  string description = 5;
+  string avatar_url = 6;
+  string url = 7;
+  bool is_active = 8;
+  string language = 9;
+  string metadata_json = 10;    // JSON with additional data (username for TG, etc.)
+  string last_sync_at = 11;
+  string created_at = 12;
+  string updated_at = 13;
 }
 
 message GetSourceRequest {
   string id = 1;
 }
 
+message GetSourceByExternalIdRequest {
+  string type = 1;
+  string external_id = 2;
+}
+
 message ListSourcesRequest {
   int32 limit = 1;
   int32 offset = 2;
-  string type = 3;
+  string type = 3;              // filter by type
+  bool active_only = 4;         // filter only active
 }
 
 message ListSourcesResponse {
   repeated SourceResponse items = 1;
   int32 total = 2;
+}
+
+message CreateSourceRequest {
+  string type = 1;              // telegram, twitter, rss
+  string external_id = 2;       // numeric ID
+  string name = 3;
+  string description = 4;
+  string avatar_url = 5;
+  string url = 6;
+  string language = 7;
+  string metadata_json = 8;     // JSON
+}
+
+message UpdateSourceRequest {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string avatar_url = 4;
+  string url = 5;
+  bool is_active = 6;
+  string language = 7;
+  string metadata_json = 8;
+}
+
+message DeleteSourceRequest {
+  string id = 1;
+}
+
+message SetSourceActiveRequest {
+  string id = 1;
+  bool is_active = 2;
 }
 
 // --- TOPIC ---

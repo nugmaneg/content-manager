@@ -73,6 +73,28 @@ interface ListWorkspaceUsersResponse {
     users: WorkspaceUserResponse[];
 }
 
+// Source interfaces
+interface SourceResponse {
+    id: string;
+    type: string;
+    external_id: string;
+    name: string;
+    description: string;
+    avatar_url: string;
+    url: string;
+    is_active: boolean;
+    language: string;
+    metadata_json: string;
+    last_sync_at: string;
+    created_at: string;
+    updated_at: string;
+}
+
+interface ListSourcesResponse {
+    items: SourceResponse[];
+    total: number;
+}
+
 interface DatabaseService {
     // User methods
     getUserById(data: GetUserByIdRequest): Observable<UserResponse>;
@@ -90,9 +112,18 @@ interface DatabaseService {
     addWorkspaceUser(data: { workspace_id: string; user_id: string; role: string }): Observable<WorkspaceUserResponse>;
     removeWorkspaceUser(data: { workspace_id: string; user_id: string }): Observable<Record<string, never>>;
     listWorkspaceUsers(data: { workspace_id: string }): Observable<ListWorkspaceUsersResponse>;
+
+    // Source methods
+    getSource(data: { id: string }): Observable<SourceResponse>;
+    getSourceByExternalId(data: { type: string; external_id: string }): Observable<SourceResponse>;
+    listSources(data: { limit?: number; offset?: number; type?: string; active_only?: boolean }): Observable<ListSourcesResponse>;
+    createSource(data: { type: string; external_id: string; name?: string; description?: string; avatar_url?: string; url?: string; language?: string; metadata_json?: string }): Observable<SourceResponse>;
+    updateSource(data: { id: string; name?: string; description?: string; avatar_url?: string; url?: string; language?: string; metadata_json?: string }): Observable<SourceResponse>;
+    setSourceActive(data: { id: string; is_active: boolean }): Observable<SourceResponse>;
+    deleteSource(data: { id: string }): Observable<Record<string, never>>;
 }
 
-export { WorkspaceResponse, WorkspaceUserResponse, ListWorkspacesResponse, ListWorkspaceUsersResponse };
+export { WorkspaceResponse, WorkspaceUserResponse, ListWorkspacesResponse, ListWorkspaceUsersResponse, SourceResponse, ListSourcesResponse };
 
 @Injectable()
 export class DatabaseGrpcClient implements OnModuleInit {
@@ -228,5 +259,90 @@ export class DatabaseGrpcClient implements OnModuleInit {
     async listWorkspaceUsers(workspaceId: string): Promise<WorkspaceUserResponse[]> {
         const result = await firstValueFrom(this.databaseService.listWorkspaceUsers({ workspace_id: workspaceId }));
         return result.users || [];
+    }
+
+    // ===================================
+    // SOURCE METHODS
+    // ===================================
+
+    async getSource(id: string): Promise<SourceResponse | null> {
+        try {
+            return await firstValueFrom(this.databaseService.getSource({ id }));
+        } catch (error: any) {
+            if (error.code === 5) return null;
+            throw error;
+        }
+    }
+
+    async getSourceByExternalId(type: string, externalId: string): Promise<SourceResponse | null> {
+        try {
+            return await firstValueFrom(this.databaseService.getSourceByExternalId({ type, external_id: externalId }));
+        } catch (error: any) {
+            if (error.code === 5) return null;
+            throw error;
+        }
+    }
+
+    async listSources(params?: { limit?: number; offset?: number; type?: string; activeOnly?: boolean }): Promise<{ items: SourceResponse[]; total: number }> {
+        const result = await firstValueFrom(this.databaseService.listSources({
+            limit: params?.limit,
+            offset: params?.offset,
+            type: params?.type,
+            active_only: params?.activeOnly,
+        }));
+        return { items: result.items || [], total: result.total || 0 };
+    }
+
+    async createSource(data: {
+        type: string;
+        externalId: string;
+        name?: string;
+        description?: string;
+        avatarUrl?: string;
+        url?: string;
+        language?: string;
+        metadata?: Record<string, any>;
+    }): Promise<SourceResponse> {
+        return await firstValueFrom(this.databaseService.createSource({
+            type: data.type,
+            external_id: data.externalId,
+            name: data.name,
+            description: data.description,
+            avatar_url: data.avatarUrl,
+            url: data.url,
+            language: data.language,
+            metadata_json: data.metadata ? JSON.stringify(data.metadata) : undefined,
+        }));
+    }
+
+    async updateSource(id: string, data: {
+        name?: string;
+        description?: string;
+        avatarUrl?: string;
+        url?: string;
+        isActive?: boolean;
+        language?: string;
+        metadata?: Record<string, any>;
+    }): Promise<SourceResponse> {
+        return await firstValueFrom(this.databaseService.updateSource({
+            id,
+            name: data.name,
+            description: data.description,
+            avatar_url: data.avatarUrl,
+            url: data.url,
+            language: data.language,
+            metadata_json: data.metadata !== undefined ? JSON.stringify(data.metadata) : undefined,
+        }));
+    }
+
+    async setSourceActive(id: string, isActive: boolean): Promise<SourceResponse> {
+        return await firstValueFrom(this.databaseService.setSourceActive({
+            id,
+            is_active: isActive,
+        }));
+    }
+
+    async deleteSource(id: string): Promise<void> {
+        await firstValueFrom(this.databaseService.deleteSource({ id }));
     }
 }

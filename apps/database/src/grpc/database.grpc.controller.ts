@@ -52,6 +52,32 @@ interface AddWorkspaceUserRequest { workspace_id: string; user_id: string; role:
 interface RemoveWorkspaceUserRequest { workspace_id: string; user_id: string; }
 interface ListWorkspaceUsersRequest { workspace_id: string; }
 
+// Source
+interface GetSourceRequest { id: string; }
+interface GetSourceByExternalIdRequest { type: string; external_id: string; }
+interface ListSourcesRequest { limit?: number; offset?: number; type?: string; active_only?: boolean; }
+interface CreateSourceRequest {
+    type: string;
+    external_id: string;
+    name?: string;
+    description?: string;
+    avatar_url?: string;
+    url?: string;
+    language?: string;
+    metadata_json?: string;
+}
+interface UpdateSourceRequest {
+    id: string;
+    name?: string;
+    description?: string;
+    avatar_url?: string;
+    url?: string;
+    is_active?: boolean;
+    language?: string;
+    metadata_json?: string;
+}
+interface DeleteSourceRequest { id: string; }
+
 @Controller()
 export class DatabaseGrpcController {
     private readonly logger = new Logger(DatabaseGrpcController.name);
@@ -132,29 +158,6 @@ export class DatabaseGrpcController {
         }
     }
 
-    // ===================================
-    // SOURCE
-    // ===================================
-
-    @GrpcMethod('DatabaseService', 'GetSource')
-    async getSource(data: GetSourceRequest) {
-        const source = await this.prisma.source.findUnique({ where: { id: data.id } });
-        if (!source) throw new RpcException({ code: status.NOT_FOUND, message: 'Source not found' });
-        return this.mapSource(source);
-    }
-
-    @GrpcMethod('DatabaseService', 'ListSources')
-    async listSources(data: ListSourcesRequest) {
-        const where: any = {};
-        if (data.type) where.type = data.type;
-
-        const [items, total] = await Promise.all([
-            this.prisma.source.findMany({ where, take: data.limit || 10, skip: data.offset || 0 }),
-            this.prisma.source.count({ where })
-        ]);
-
-        return { items: items.map(this.mapSource), total };
-    }
 
     // ===================================
     // TOPIC
@@ -571,6 +574,156 @@ export class DatabaseGrpcController {
     }
 
     // ===================================
+    // SOURCE
+    // ===================================
+
+    @GrpcMethod('DatabaseService', 'GetSource')
+    async getSource(data: GetSourceRequest) {
+        if (!data.id) throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Source ID required' });
+
+        const source = await this.prisma.source.findUnique({ where: { id: data.id } });
+        if (!source) throw new RpcException({ code: status.NOT_FOUND, message: 'Source not found' });
+
+        return this.mapSource(source);
+    }
+
+    @GrpcMethod('DatabaseService', 'GetSourceByExternalId')
+    async getSourceByExternalId(data: GetSourceByExternalIdRequest) {
+        if (!data.type || !data.external_id) {
+            throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Type and external_id required' });
+        }
+
+        const source = await this.prisma.source.findUnique({
+            where: { type_externalId: { type: data.type, externalId: data.external_id } }
+        });
+        if (!source) throw new RpcException({ code: status.NOT_FOUND, message: 'Source not found' });
+
+        return this.mapSource(source);
+    }
+
+    @GrpcMethod('DatabaseService', 'ListSources')
+    async listSources(data: ListSourcesRequest) {
+        const where: any = {};
+        if (data.type) where.type = data.type;
+        if (data.active_only) where.isActive = true;
+
+        const [items, total] = await Promise.all([
+            this.prisma.source.findMany({
+                where,
+                take: data.limit || 50,
+                skip: data.offset || 0,
+                orderBy: { createdAt: 'desc' }
+            }),
+            this.prisma.source.count({ where })
+        ]);
+
+        return { items: items.map(this.mapSource), total };
+    }
+
+    @GrpcMethod('DatabaseService', 'CreateSource')
+    async createSource(data: CreateSourceRequest) {
+        if (!data.type || !data.external_id) {
+            throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Type and external_id required' });
+        }
+
+        try {
+            const source = await this.prisma.source.create({
+                data: {
+                    type: data.type,
+                    externalId: data.external_id,
+                    name: data.name || null,
+                    description: data.description || null,
+                    avatarUrl: data.avatar_url || null,
+                    url: data.url || null,
+                    language: data.language || null,
+                    metadata: data.metadata_json ? JSON.parse(data.metadata_json) : null,
+                }
+            });
+            this.logger.log(`Created source ${source.id} (${data.type}:${data.external_id})`);
+            return this.mapSource(source);
+        } catch (e: any) {
+            if (e.code === 'P2002') {
+                throw new RpcException({ code: status.ALREADY_EXISTS, message: 'Source with this type and external_id already exists' });
+            }
+            this.logger.error(e);
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to create source' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'UpdateSource')
+    async updateSource(data: UpdateSourceRequest) {
+        if (!data.id) throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Source ID required' });
+
+        try {
+            const updateData: any = {};
+            // Only update fields that have non-empty values (protobuf sends "" for undefined strings)
+            if (data.name) updateData.name = data.name;
+            if (data.description) updateData.description = data.description;
+            if (data.avatar_url) updateData.avatarUrl = data.avatar_url;
+            if (data.url) updateData.url = data.url;
+            // Note: is_active is NOT updated here because protobuf can't distinguish false from unset
+            // Use a separate endpoint to toggle active status
+            if (data.language) updateData.language = data.language;
+            if (data.metadata_json) {
+                updateData.metadata = JSON.parse(data.metadata_json);
+            }
+
+            // If no fields to update, just return current source
+            if (Object.keys(updateData).length === 0) {
+                const source = await this.prisma.source.findUnique({ where: { id: data.id } });
+                if (!source) throw new RpcException({ code: status.NOT_FOUND, message: 'Source not found' });
+                return this.mapSource(source);
+            }
+
+            const source = await this.prisma.source.update({
+                where: { id: data.id },
+                data: updateData
+            });
+            return this.mapSource(source);
+        } catch (e: any) {
+            if (e.code === 'P2025') {
+                throw new RpcException({ code: status.NOT_FOUND, message: 'Source not found' });
+            }
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to update source' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'DeleteSource')
+    async deleteSource(data: DeleteSourceRequest) {
+        if (!data.id) throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Source ID required' });
+
+        try {
+            await this.prisma.source.delete({ where: { id: data.id } });
+            this.logger.log(`Deleted source ${data.id}`);
+            return {};
+        } catch (e: any) {
+            if (e.code === 'P2025') {
+                throw new RpcException({ code: status.NOT_FOUND, message: 'Source not found' });
+            }
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to delete source' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'SetSourceActive')
+    async setSourceActive(data: { id: string; is_active: boolean }) {
+        if (!data.id) throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Source ID required' });
+
+        try {
+            const source = await this.prisma.source.update({
+                where: { id: data.id },
+                data: { isActive: data.is_active }
+            });
+            this.logger.log(`Set source ${data.id} active=${data.is_active}`);
+            return this.mapSource(source);
+        } catch (e: any) {
+            if (e.code === 'P2025') {
+                throw new RpcException({ code: status.NOT_FOUND, message: 'Source not found' });
+            }
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to update source status' });
+        }
+    }
+
+    // ===================================
     // HELPERS
     // ===================================
 
@@ -597,9 +750,15 @@ export class DatabaseGrpcController {
             type: item.type,
             external_id: item.externalId,
             name: item.name ?? '',
+            description: item.description ?? '',
+            avatar_url: item.avatarUrl ?? '',
+            url: item.url ?? '',
             is_active: item.isActive,
             language: item.language ?? '',
-            created_at: item.createdAt.toISOString()
+            metadata_json: item.metadata ? JSON.stringify(item.metadata) : '',
+            last_sync_at: item.lastSyncAt ? item.lastSyncAt.toISOString() : '',
+            created_at: item.createdAt.toISOString(),
+            updated_at: item.updatedAt.toISOString(),
         };
     }
 
