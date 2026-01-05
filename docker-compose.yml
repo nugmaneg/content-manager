@@ -132,6 +132,28 @@ services:
     networks: [ cm-network ]
     deploy: { resources: { limits: { memory: 512M } } }
 
+  # ===========================================
+  # WEB ADMIN
+  # ===========================================
+  admin-web:
+    build:
+      context: .
+      dockerfile: apps/admin-web/Dockerfile
+      args:
+        # Browser connects via localhost, not Docker internal network
+        - NEXT_PUBLIC_API_URL=http://localhost:3000
+    container_name: cm-admin-web
+    environment:
+      - NODE_ENV=production
+      - PORT=3005
+    depends_on:
+      core: { condition: service_started }
+    ports: [ "3005:3005" ]
+    restart: unless-stopped
+    stop_grace_period: 15s
+    networks: [ cm-network ]
+    deploy: { resources: { limits: { memory: 256M } } }
+
 networks:
   cm-network:
     driver: bridge
@@ -140,3 +162,5 @@ volumes:
   redis-data:
   postgres-data:
   qdrant-data:
+
+

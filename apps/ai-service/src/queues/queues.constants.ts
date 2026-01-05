@@ -5,6 +5,8 @@ import {
     AiJobName,
     GenerateTextPayload,
     AnalyzeTextPayload,
+    GenerateEmbeddingPayload,
+    EmbeddingResult,
     AiAnalysisResult,
     GenerationOptions,
 } from '@queue-contracts/ai';
@@ -18,6 +20,9 @@ export type {
     AiJobName,
     GenerateTextPayload,
     AnalyzeTextPayload,
+    GenerateEmbeddingPayload,
+    EmbeddingResult,
     AiAnalysisResult,
     GenerationOptions,
 };
+

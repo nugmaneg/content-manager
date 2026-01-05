@@ -1,12 +1,18 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, HttpCode, HttpStatus, Logger } from '@nestjs/common';
 import { SourcesService } from './sources.service';
+import { SourceSyncOrchestrator } from './sync/source-sync-orchestrator.service';
 import { CreateSourceDto, UpdateSourceDto, SetSourceActiveDto } from './dto';
 import { JwtAuthGuard, CurrentUser, UserFromToken } from '../auth';
 
 @Controller('api/sources')
 @UseGuards(JwtAuthGuard)
 export class SourcesController {
-    constructor(private readonly sourcesService: SourcesService) { }
+    private readonly logger = new Logger(SourcesController.name);
+
+    constructor(
+        private readonly sourcesService: SourcesService,
+        private readonly syncOrchestrator: SourceSyncOrchestrator,
+    ) { }
 
     @Post()
     @HttpCode(HttpStatus.CREATED)
@@ -58,6 +64,26 @@ export class SourcesController {
     ) {
         const source = await this.sourcesService.setActive(user, id, dto.isActive);
         return this.formatSource(source);
+    }
+
+    @Post(':id/sync')
+    @HttpCode(HttpStatus.OK)
+    async syncSource(
+        @CurrentUser() user: UserFromToken,
+        @Param('id') id: string,
+        @Query('limit') limit?: string,
+    ) {
+        // Check admin access
+        if (user.role !== 'FATHER' && user.role !== 'ADMIN') {
+            throw new Error('Only FATHER and ADMIN can sync sources');
+        }
+
+        this.logger.log(`Sync requested for source ${id} by user ${user.id}, limit=${limit}`);
+
+        // Делегировать оркестратору - он сам определит тип источника
+        return await this.syncOrchestrator.syncSource(id, {
+            limit: limit ? parseInt(limit, 10) : undefined,
+        });
     }
 
     @Delete(':id')

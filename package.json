@@ -17,9 +17,13 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./apps/content-manager/test/jest-e2e.json"
+    "test:e2e": "jest --config ./apps/content-manager/test/jest-e2e.json",
+    "admin:dev": "npm run dev --prefix apps/admin-web",
+    "admin:build": "npm run build --prefix apps/admin-web",
+    "admin:start": "npm run start --prefix apps/admin-web"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.2",
     "@ai-sdk/xai": "^3.0.0",
     "@grpc/grpc-js": "^1.14.3",
     "@grpc/proto-loader": "^0.8.0",

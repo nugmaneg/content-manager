@@ -4,14 +4,16 @@ import { Job } from 'bullmq';
 import { Logger } from '@nestjs/common';
 import { AiProviderFactory } from '../providers/ai-provider.factory';
 import {
-  QUEUE_AI_PROCESSING,
-  JOBS_AI,
-  GenerateTextPayload,
-  AnalyzeTextPayload,
-  AiJobName,
+    QUEUE_AI_PROCESSING,
+    JOBS_AI,
+    GenerateTextPayload,
+    AnalyzeTextPayload,
+    GenerateEmbeddingPayload,
+    EmbeddingResult,
+    AiJobName,
 } from '../queues/queues.constants';
 
-type AiJobPayload = GenerateTextPayload | AnalyzeTextPayload;
+type AiJobPayload = GenerateTextPayload | AnalyzeTextPayload | GenerateEmbeddingPayload;
 
 @Processor(QUEUE_AI_PROCESSING)
 export class AiProcessor extends WorkerHost {
@@ -30,6 +32,8 @@ export class AiProcessor extends WorkerHost {
                     return this.handleGenerateText(job.data as GenerateTextPayload);
                 case JOBS_AI.analyzeText:
                     return this.handleAnalyzeText(job.data as AnalyzeTextPayload);
+                case JOBS_AI.generateEmbedding:
+                    return this.handleGenerateEmbedding(job.data as GenerateEmbeddingPayload);
                 default:
                     return this.logger.warn(`Unknown job name: ${job.name}`);
             }
@@ -52,4 +56,20 @@ export class AiProcessor extends WorkerHost {
         const provider = this.providerFactory.getProvider(providerName);
         return await provider.analyzeText(data.text);
     }
+
+    private async handleGenerateEmbedding(data: GenerateEmbeddingPayload): Promise<EmbeddingResult> {
+        // Use OpenAI as default embedding provider
+        const provider = data.provider
+            ? this.providerFactory.getProvider(data.provider)
+            : this.providerFactory.getEmbeddingProvider();
+
+        const embedding = await provider.generateEmbedding(data.text);
+
+        return {
+            embedding,
+            model: 'text-embedding-3-small',
+            dimensions: embedding.length,
+        };
+    }
 }
+

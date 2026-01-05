@@ -8,6 +8,9 @@ import { PipelineModule } from './pipeline/pipeline.module';
 import { AuthModule } from './auth';
 import { WorkspacesModule } from './workspaces';
 import { SourcesModule } from './sources';
+import { WorkspaceDonorsModule } from './workspace-donors';
+import { TargetsModule } from './targets';
+import { ContentModule } from './content/content.module';
 import { LoggerMiddleware } from '@logger';
 
 @Module({
@@ -18,6 +21,9 @@ import { LoggerMiddleware } from '@logger';
     AuthModule,
     WorkspacesModule,
     SourcesModule,
+    WorkspaceDonorsModule,
+    TargetsModule,
+    ContentModule,
   ],
   controllers: [CoreController, TelegramQueueController],
   providers: [CoreService],

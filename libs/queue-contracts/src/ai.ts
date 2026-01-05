@@ -4,6 +4,7 @@ export const QUEUE_AI_PROCESSING = 'ai_processing' as const;
 export const JOBS_AI = {
     generateText: 'generate_text',
     analyzeText: 'analyze_text',
+    generateEmbedding: 'generate_embedding',
 } as const;
 
 export type AiJobName = (typeof JOBS_AI)[keyof typeof JOBS_AI];
@@ -23,6 +24,17 @@ export interface GenerateTextPayload {
 export interface AnalyzeTextPayload {
     text: string;
     provider?: string;
+}
+
+export interface GenerateEmbeddingPayload {
+    text: string;
+    provider?: string; // defaults to 'openai'
+}
+
+export interface EmbeddingResult {
+    embedding: number[];
+    model: string;
+    dimensions: number;
 }
 
 export interface AiAnalysisResult {
@@ -45,3 +57,4 @@ export interface AiAnalysisResult {
     };
     [key: string]: any;
 }
+

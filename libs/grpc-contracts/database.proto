@@ -12,6 +12,8 @@ service DatabaseService {
   rpc ListContent (ListContentRequest) returns (ListContentResponse);
   rpc CreateContent (CreateContentRequest) returns (ContentResponse);
   rpc UpdateContent (UpdateContentRequest) returns (ContentResponse);
+  rpc GetLastContentForSource (GetLastContentForSourceRequest) returns (ContentResponse);
+  rpc UpsertContentVector (UpsertContentVectorRequest) returns (UpsertContentVectorResponse);
 
   // === SOURCE ===
   rpc GetSource (GetSourceRequest) returns (SourceResponse);
@@ -58,6 +60,19 @@ service DatabaseService {
   rpc AddWorkspaceUser (AddWorkspaceUserRequest) returns (WorkspaceUserResponse);
   rpc RemoveWorkspaceUser (RemoveWorkspaceUserRequest) returns (Empty);
   rpc ListWorkspaceUsers (ListWorkspaceUsersRequest) returns (ListWorkspaceUsersResponse);
+
+  // === WORKSPACE DONOR (Source ↔ Workspace) ===
+  rpc AddWorkspaceDonor (AddWorkspaceDonorRequest) returns (WorkspaceDonorResponse);
+  rpc RemoveWorkspaceDonor (RemoveWorkspaceDonorRequest) returns (Empty);
+  rpc ListWorkspaceDonors (ListWorkspaceDonorsRequest) returns (ListWorkspaceDonorsResponse);
+  rpc UpdateWorkspaceDonor (UpdateWorkspaceDonorRequest) returns (WorkspaceDonorResponse);
+
+  // === TARGET (Publication Channels) ===
+  rpc GetTarget (GetTargetRequest) returns (TargetResponse);
+  rpc ListTargets (ListTargetsRequest) returns (ListTargetsResponse);
+  rpc CreateTarget (CreateTargetRequest) returns (TargetResponse);
+  rpc UpdateTarget (UpdateTargetRequest) returns (TargetResponse);
+  rpc DeleteTarget (DeleteTargetRequest) returns (Empty);
 }
 
 // ===========================================
@@ -115,6 +130,24 @@ message UpdateContentRequest {
   string ai_analysis_json = 6;
   string status = 7;
 }
+
+message GetLastContentForSourceRequest {
+  string source_id = 1;
+}
+
+message UpsertContentVectorRequest {
+  string content_id = 1;
+  repeated float vector = 2;    // Embedding (1536 floats for OpenAI)
+  string summary = 3;           // For payload/search
+  string category = 4;          // For filtering
+  string language = 5;          // For filtering
+}
+
+message UpsertContentVectorResponse {
+  string qdrant_id = 1;
+  bool success = 2;
+}
+
 
 // --- SOURCE ---
 
@@ -175,6 +208,7 @@ message UpdateSourceRequest {
   bool is_active = 6;
   string language = 7;
   string metadata_json = 8;
+  string last_sync_at = 9;
 }
 
 message DeleteSourceRequest {
@@ -449,4 +483,118 @@ message ListWorkspaceUsersResponse {
   repeated WorkspaceUserResponse users = 1;
 }
 
+// --- WORKSPACE DONOR ---
+
+message WorkspaceDonorResponse {
+  string id = 1;
+  string workspace_id = 2;
+  string source_id = 3;
+  bool is_active = 4;
+  string settings_json = 5;
+  string created_at = 6;
+  // Embedded source info for convenience
+  string source_type = 7;
+  string source_external_id = 8;
+  string source_name = 9;
+}
+
+message AddWorkspaceDonorRequest {
+  string workspace_id = 1;
+  string source_id = 2;
+  string settings_json = 3;
+}
+
+message RemoveWorkspaceDonorRequest {
+  string workspace_id = 1;
+  string source_id = 2;
+}
+
+message ListWorkspaceDonorsRequest {
+  string workspace_id = 1;
+  bool active_only = 2;
+}
+
+message ListWorkspaceDonorsResponse {
+  repeated WorkspaceDonorResponse donors = 1;
+}
+
+message UpdateWorkspaceDonorRequest {
+  string workspace_id = 1;
+  string source_id = 2;
+  bool is_active = 3;
+  string settings_json = 4;
+}
+
+// --- TARGET ---
+
+message TargetResponse {
+  string id = 1;
+  string workspace_id = 2;
+  string type = 3;              // telegram, twitter, etc.
+  string external_id = 4;       // channel id, @handle, etc.
+  string name = 5;
+  string description = 6;
+  string language = 7;
+  string timezone = 8;
+  int32 max_posts_per_day = 9;
+  int32 min_post_interval = 10; // minutes
+  string settings_json = 11;
+  string work_schedule_json = 12;
+  string account_id = 13;
+  bool is_active = 14;
+  string metadata_json = 15;
+  string created_at = 16;
+  string updated_at = 17;
+}
+
+message GetTargetRequest {
+  string id = 1;
+}
+
+message ListTargetsRequest {
+  string workspace_id = 1;
+  bool active_only = 2;
+  string type = 3;              // filter by type
+}
+
+message ListTargetsResponse {
+  repeated TargetResponse targets = 1;
+  int32 total = 2;
+}
+
+message CreateTargetRequest {
+  string workspace_id = 1;
+  string type = 2;
+  string external_id = 3;
+  string name = 4;
+  string description = 5;
+  string language = 6;
+  string timezone = 7;
+  int32 max_posts_per_day = 8;
+  int32 min_post_interval = 9;
+  string settings_json = 10;
+  string work_schedule_json = 11;
+  string account_id = 12;
+}
+
+message UpdateTargetRequest {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string language = 4;
+  string timezone = 5;
+  int32 max_posts_per_day = 6;
+  int32 min_post_interval = 7;
+  string settings_json = 8;
+  string work_schedule_json = 9;
+  string account_id = 10;
+  bool is_active = 11;
+  string metadata_json = 12;
+}
+
+message DeleteTargetRequest {
+  string id = 1;
+}
+
 message Empty {}
+

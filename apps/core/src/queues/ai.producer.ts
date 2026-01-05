@@ -7,6 +7,8 @@ import {
     QUEUE_AI_PROCESSING,
     AiAnalysisResult,
     GenerateTextPayload,
+    GenerateEmbeddingPayload,
+    EmbeddingResult,
 } from '@queue-contracts/ai';
 
 @Injectable()
@@ -45,4 +47,16 @@ export class AiProducer {
         );
         return await job.waitUntilFinished(this.events);
     }
+
+    async generateEmbedding(payload: GenerateEmbeddingPayload): Promise<EmbeddingResult> {
+        const job = await this.queue.add(
+            JOBS_AI.generateEmbedding,
+            payload,
+            {
+                removeOnComplete: true,
+            }
+        );
+        return await job.waitUntilFinished(this.events);
+    }
 }
+

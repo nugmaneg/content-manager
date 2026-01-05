@@ -11,6 +11,8 @@ interface GetContentRequest { id: string; }
 interface ListContentRequest { limit?: number; offset?: number; sourceId?: string; status?: string; }
 interface CreateContentRequest { external_id: string; source_id: string; text?: string; raw_data_json?: string; received_via_id?: string; source_date?: string; }
 interface UpdateContentRequest { id: string; text?: string; is_vectorized?: boolean; qdrant_id?: string; embedding_model?: string; ai_analysis_json?: string; status?: string; }
+interface GetLastContentForSourceRequest { source_id: string; }
+interface UpsertContentVectorRequest { content_id: string; vector: number[]; summary?: string; category?: string; language?: string; }
 
 // Source
 interface GetSourceRequest { id: string; }
@@ -75,6 +77,7 @@ interface UpdateSourceRequest {
     is_active?: boolean;
     language?: string;
     metadata_json?: string;
+    last_sync_at?: string;
 }
 interface DeleteSourceRequest { id: string; }
 
@@ -126,12 +129,26 @@ export class DatabaseGrpcController {
                     sourceId: data.source_id,
                     text: data.text,
                     rawData: data.raw_data_json ? JSON.parse(data.raw_data_json) : undefined,
-                    receivedViaId: data.received_via_id,
+                    receivedViaId: data.received_via_id || undefined,
                     sourceDate: data.source_date ? new Date(data.source_date) : undefined,
                 }
             });
             return this.mapContent(content);
-        } catch (e) {
+        } catch (e: any) {
+            // Handle duplicate entry (Unique constraint violated on sourceId+externalId)
+            if (e.code === 'P2002') {
+                this.logger.debug(`Content already exists: ${data.external_id} for source ${data.source_id}`);
+                const existing = await this.prisma.content.findUnique({
+                    where: {
+                        sourceId_externalId: {
+                            sourceId: data.source_id,
+                            externalId: data.external_id,
+                        }
+                    }
+                });
+                if (existing) return this.mapContent(existing);
+            }
+
             this.logger.error(e);
             throw new RpcException({ code: status.INTERNAL, message: 'Failed to create content' });
         }
@@ -141,20 +158,95 @@ export class DatabaseGrpcController {
     async updateContent(data: UpdateContentRequest) {
         try {
             const updateData: any = {};
-            if (data.text !== undefined) updateData.text = data.text;
+            if (data.text !== undefined && data.text !== '') updateData.text = data.text;
             if (data.is_vectorized !== undefined) updateData.isVectorized = data.is_vectorized;
-            if (data.qdrant_id !== undefined) updateData.qdrantId = data.qdrant_id;
-            if (data.embedding_model !== undefined) updateData.embeddingModel = data.embedding_model;
-            if (data.status !== undefined) updateData.status = data.status;
-            if (data.ai_analysis_json !== undefined) updateData.aiAnalysis = JSON.parse(data.ai_analysis_json);
+            if (data.qdrant_id !== undefined && data.qdrant_id !== '') updateData.qdrantId = data.qdrant_id;
+            if (data.embedding_model !== undefined && data.embedding_model !== '') updateData.embeddingModel = data.embedding_model;
+            if (data.status !== undefined && data.status !== '') updateData.status = data.status;
+
+            // Debug: проверим что приходит в ai_analysis_json
+            this.logger.debug(`ai_analysis_json: type=${typeof data.ai_analysis_json}, length=${data.ai_analysis_json?.length}, value=${data.ai_analysis_json?.substring(0, 100)}`);
+
+            if (data.ai_analysis_json !== undefined && data.ai_analysis_json !== '') {
+                try {
+                    updateData.aiAnalysis = JSON.parse(data.ai_analysis_json);
+                    this.logger.debug(`Parsed aiAnalysis successfully`);
+                } catch (jsonError) {
+                    this.logger.error(`Failed to parse ai_analysis_json for content ${data.id}`, jsonError);
+                    throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Invalid JSON in ai_analysis_json' });
+                }
+            }
+
+            this.logger.debug(`Updating content ${data.id} with fields: ${Object.keys(updateData).join(', ')}`);
 
             const content = await this.prisma.content.update({
                 where: { id: data.id },
                 data: updateData
             });
+
+            this.logger.debug(`Successfully updated content ${data.id}`);
             return this.mapContent(content);
-        } catch (e) {
-            throw new RpcException({ code: status.NOT_FOUND, message: `Content not found or update failed` });
+        } catch (e: any) {
+            if (e.code === 'P2025') {
+                this.logger.warn(`Content not found: ${data.id}`);
+                throw new RpcException({ code: status.NOT_FOUND, message: 'Content not found' });
+            }
+
+            this.logger.error(`Failed to update content ${data.id}:`, e);
+            throw new RpcException({ code: status.INTERNAL, message: `Failed to update content: ${e.message}` });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'GetLastContentForSource')
+    async getLastContentForSource(data: { source_id: string }) {
+        if (!data.source_id) throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Source ID required' });
+
+        const content = await this.prisma.content.findFirst({
+            where: { sourceId: data.source_id },
+            orderBy: { sourceDate: 'desc' },
+        });
+
+        if (!content) {
+            throw new RpcException({ code: status.NOT_FOUND, message: 'No content found for this source' });
+        }
+
+        return this.mapContent(content);
+    }
+
+    @GrpcMethod('DatabaseService', 'UpsertContentVector')
+    async upsertContentVector(data: UpsertContentVectorRequest) {
+        if (!data.content_id) throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Content ID required' });
+        if (!data.vector || data.vector.length === 0) throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Vector required' });
+
+        try {
+            // Используем content_id как qdrant_id для простоты
+            const qdrantId = data.content_id;
+
+            // Сохраняем вектор в Qdrant
+            await this.qdrant.upsertVector(
+                this.qdrant.getContentCollectionName(),
+                qdrantId,
+                data.vector,
+                {
+                    contentId: data.content_id,
+                    summary: data.summary || '',
+                    category: data.category || '',
+                    language: data.language || '',
+                }
+            );
+
+            // Обновляем Content с qdrantId
+            await this.prisma.content.update({
+                where: { id: data.content_id },
+                data: { qdrantId, isVectorized: true }
+            });
+
+            this.logger.log(`Saved vector to Qdrant for content ${data.content_id}`);
+
+            return { qdrant_id: qdrantId, success: true };
+        } catch (e: any) {
+            this.logger.error(`Failed to upsert vector for content ${data.content_id}:`, e);
+            throw new RpcException({ code: status.INTERNAL, message: `Failed to save vector: ${e.message}` });
         }
     }
 
@@ -667,6 +759,10 @@ export class DatabaseGrpcController {
             if (data.metadata_json) {
                 updateData.metadata = JSON.parse(data.metadata_json);
             }
+            if (data.last_sync_at) {
+                updateData.lastSyncAt = new Date(data.last_sync_at);
+            }
+
 
             // If no fields to update, just return current source
             if (Object.keys(updateData).length === 0) {
@@ -833,5 +929,300 @@ export class DatabaseGrpcController {
             user_name: item.user?.name ?? '',
             created_at: item.createdAt.toISOString(),
         };
+    }
+
+    private mapWorkspaceDonor = (item: any) => {
+        return {
+            id: item.id,
+            workspace_id: item.workspaceId,
+            source_id: item.sourceId,
+            is_active: item.isActive,
+            settings_json: item.settings ? JSON.stringify(item.settings) : '',
+            created_at: item.createdAt.toISOString(),
+            source_type: item.source?.type ?? '',
+            source_external_id: item.source?.externalId ?? '',
+            source_name: item.source?.name ?? '',
+        };
+    }
+
+    private mapTarget = (item: any) => {
+        return {
+            id: item.id,
+            workspace_id: item.workspaceId,
+            type: item.type,
+            external_id: item.externalId,
+            name: item.name ?? '',
+            description: item.description ?? '',
+            language: item.language,
+            timezone: item.timezone,
+            max_posts_per_day: item.maxPostsPerDay ?? 0,
+            min_post_interval: item.minPostInterval ?? 0,
+            settings_json: item.settings ? JSON.stringify(item.settings) : '',
+            work_schedule_json: item.workSchedule ? JSON.stringify(item.workSchedule) : '',
+            account_id: item.accountId ?? '',
+            is_active: item.isActive,
+            metadata_json: item.metadata ? JSON.stringify(item.metadata) : '',
+            created_at: item.createdAt.toISOString(),
+            updated_at: item.updatedAt.toISOString(),
+        };
+    }
+
+    // ===================================
+    // WORKSPACE DONOR
+    // ===================================
+
+    @GrpcMethod('DatabaseService', 'AddWorkspaceDonor')
+    async addWorkspaceDonor(data: { workspace_id: string; source_id: string; settings_json?: string }) {
+        if (!data.workspace_id || !data.source_id) {
+            throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'workspace_id and source_id required' });
+        }
+
+        try {
+            const donor = await this.prisma.workspaceDonor.create({
+                data: {
+                    workspaceId: data.workspace_id,
+                    sourceId: data.source_id,
+                    settings: data.settings_json ? JSON.parse(data.settings_json) : null,
+                },
+                include: { source: true }
+            });
+            this.logger.log(`Added donor: workspace=${data.workspace_id}, source=${data.source_id}`);
+            return this.mapWorkspaceDonor(donor);
+        } catch (e: any) {
+            if (e.code === 'P2002') {
+                throw new RpcException({ code: status.ALREADY_EXISTS, message: 'Source already added to this workspace' });
+            }
+            if (e.code === 'P2003') {
+                throw new RpcException({ code: status.NOT_FOUND, message: 'Workspace or Source not found' });
+            }
+            this.logger.error(e);
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to add workspace donor' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'RemoveWorkspaceDonor')
+    async removeWorkspaceDonor(data: { workspace_id: string; source_id: string }) {
+        if (!data.workspace_id || !data.source_id) {
+            throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'workspace_id and source_id required' });
+        }
+
+        try {
+            await this.prisma.workspaceDonor.delete({
+                where: {
+                    workspaceId_sourceId: {
+                        workspaceId: data.workspace_id,
+                        sourceId: data.source_id
+                    }
+                }
+            });
+            this.logger.log(`Removed donor: workspace=${data.workspace_id}, source=${data.source_id}`);
+            return {};
+        } catch (e: any) {
+            if (e.code === 'P2025') {
+                throw new RpcException({ code: status.NOT_FOUND, message: 'Workspace donor not found' });
+            }
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to remove workspace donor' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'ListWorkspaceDonors')
+    async listWorkspaceDonors(data: { workspace_id: string; active_only?: boolean }) {
+        if (!data.workspace_id) {
+            throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'workspace_id required' });
+        }
+
+        const where: any = { workspaceId: data.workspace_id };
+        if (data.active_only) where.isActive = true;
+
+        const donors = await this.prisma.workspaceDonor.findMany({
+            where,
+            include: { source: true },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        return { donors: donors.map(this.mapWorkspaceDonor) };
+    }
+
+    @GrpcMethod('DatabaseService', 'UpdateWorkspaceDonor')
+    async updateWorkspaceDonor(data: { workspace_id: string; source_id: string; is_active?: boolean; settings_json?: string }) {
+        if (!data.workspace_id || !data.source_id) {
+            throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'workspace_id and source_id required' });
+        }
+
+        try {
+            const updateData: any = {};
+            if (data.is_active !== undefined) updateData.isActive = data.is_active;
+            if (data.settings_json !== undefined) {
+                updateData.settings = data.settings_json ? JSON.parse(data.settings_json) : null;
+            }
+
+            const donor = await this.prisma.workspaceDonor.update({
+                where: {
+                    workspaceId_sourceId: {
+                        workspaceId: data.workspace_id,
+                        sourceId: data.source_id
+                    }
+                },
+                data: updateData,
+                include: { source: true }
+            });
+            return this.mapWorkspaceDonor(donor);
+        } catch (e: any) {
+            if (e.code === 'P2025') {
+                throw new RpcException({ code: status.NOT_FOUND, message: 'Workspace donor not found' });
+            }
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to update workspace donor' });
+        }
+    }
+
+    // ===================================
+    // TARGET
+    // ===================================
+
+    @GrpcMethod('DatabaseService', 'GetTarget')
+    async getTarget(data: { id: string }) {
+        if (!data.id) throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Target ID required' });
+
+        const target = await this.prisma.target.findUnique({ where: { id: data.id } });
+        if (!target) throw new RpcException({ code: status.NOT_FOUND, message: 'Target not found' });
+
+        return this.mapTarget(target);
+    }
+
+    @GrpcMethod('DatabaseService', 'ListTargets')
+    async listTargets(data: { workspace_id: string; active_only?: boolean; type?: string }) {
+        if (!data.workspace_id) {
+            throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'workspace_id required' });
+        }
+
+        const where: any = { workspaceId: data.workspace_id };
+        if (data.active_only) where.isActive = true;
+        if (data.type) where.type = data.type;
+
+        const [targets, total] = await Promise.all([
+            this.prisma.target.findMany({
+                where,
+                orderBy: { createdAt: 'desc' }
+            }),
+            this.prisma.target.count({ where })
+        ]);
+
+        return { targets: targets.map(this.mapTarget), total };
+    }
+
+    @GrpcMethod('DatabaseService', 'CreateTarget')
+    async createTarget(data: {
+        workspace_id: string;
+        type: string;
+        external_id: string;
+        name?: string;
+        description?: string;
+        language?: string;
+        timezone?: string;
+        max_posts_per_day?: number;
+        min_post_interval?: number;
+        settings_json?: string;
+        work_schedule_json?: string;
+        account_id?: string;
+    }) {
+        if (!data.workspace_id || !data.type || !data.external_id) {
+            throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'workspace_id, type, and external_id required' });
+        }
+
+        try {
+            const target = await this.prisma.target.create({
+                data: {
+                    workspaceId: data.workspace_id,
+                    type: data.type,
+                    externalId: data.external_id,
+                    name: data.name || null,
+                    description: data.description || null,
+                    language: data.language || 'ru',
+                    timezone: data.timezone || 'UTC',
+                    maxPostsPerDay: data.max_posts_per_day || null,
+                    minPostInterval: data.min_post_interval || null,
+                    settings: data.settings_json ? JSON.parse(data.settings_json) : null,
+                    workSchedule: data.work_schedule_json ? JSON.parse(data.work_schedule_json) : null,
+                    accountId: data.account_id || null,
+                }
+            });
+            this.logger.log(`Created target ${target.id} (${data.type}:${data.external_id})`);
+            return this.mapTarget(target);
+        } catch (e: any) {
+            if (e.code === 'P2002') {
+                throw new RpcException({ code: status.ALREADY_EXISTS, message: 'Target with this type and external_id already exists' });
+            }
+            if (e.code === 'P2003') {
+                throw new RpcException({ code: status.NOT_FOUND, message: 'Workspace or Account not found' });
+            }
+            this.logger.error(e);
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to create target' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'UpdateTarget')
+    async updateTarget(data: {
+        id: string;
+        name?: string;
+        description?: string;
+        language?: string;
+        timezone?: string;
+        max_posts_per_day?: number;
+        min_post_interval?: number;
+        settings_json?: string;
+        work_schedule_json?: string;
+        account_id?: string;
+        is_active?: boolean;
+        metadata_json?: string;
+    }) {
+        if (!data.id) throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Target ID required' });
+
+        try {
+            const updateData: any = {};
+            if (data.name) updateData.name = data.name;
+            if (data.description) updateData.description = data.description;
+            if (data.language) updateData.language = data.language;
+            if (data.timezone) updateData.timezone = data.timezone;
+            if (data.max_posts_per_day !== undefined) updateData.maxPostsPerDay = data.max_posts_per_day || null;
+            if (data.min_post_interval !== undefined) updateData.minPostInterval = data.min_post_interval || null;
+            if (data.settings_json !== undefined) {
+                updateData.settings = data.settings_json ? JSON.parse(data.settings_json) : null;
+            }
+            if (data.work_schedule_json !== undefined) {
+                updateData.workSchedule = data.work_schedule_json ? JSON.parse(data.work_schedule_json) : null;
+            }
+            if (data.account_id !== undefined) updateData.accountId = data.account_id || null;
+            if (data.is_active !== undefined) updateData.isActive = data.is_active;
+            if (data.metadata_json !== undefined) {
+                updateData.metadata = data.metadata_json ? JSON.parse(data.metadata_json) : null;
+            }
+
+            const target = await this.prisma.target.update({
+                where: { id: data.id },
+                data: updateData
+            });
+            return this.mapTarget(target);
+        } catch (e: any) {
+            if (e.code === 'P2025') {
+                throw new RpcException({ code: status.NOT_FOUND, message: 'Target not found' });
+            }
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to update target' });
+        }
+    }
+
+    @GrpcMethod('DatabaseService', 'DeleteTarget')
+    async deleteTarget(data: { id: string }) {
+        if (!data.id) throw new RpcException({ code: status.INVALID_ARGUMENT, message: 'Target ID required' });
+
+        try {
+            await this.prisma.target.delete({ where: { id: data.id } });
+            this.logger.log(`Deleted target ${data.id}`);
+            return {};
+        } catch (e: any) {
+            if (e.code === 'P2025') {
+                throw new RpcException({ code: status.NOT_FOUND, message: 'Target not found' });
+            }
+            throw new RpcException({ code: status.INTERNAL, message: 'Failed to delete target' });
+        }
     }
 }
