@@ -11,10 +11,7 @@ import { QueuesModule } from './queues/queues.module';
     StorageModule,
     QueuesModule,
   ],
-  controllers: [
-    HealthController,
-    DatabaseGrpcController,
-  ],
+  controllers: [HealthController, DatabaseGrpcController],
   providers: [],
 })
-export class DatabaseModule { }
+export class DatabaseModule {}

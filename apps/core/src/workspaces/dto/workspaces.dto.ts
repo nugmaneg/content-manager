@@ -1,28 +1,28 @@
 import { IsString, IsOptional, IsObject } from 'class-validator';
 
 export class CreateWorkspaceDto {
-    @IsString()
-    name: string;
+  @IsString()
+  name: string;
 
-    @IsOptional()
-    @IsObject()
-    settings?: Record<string, any>;
+  @IsOptional()
+  @IsObject()
+  settings?: Record<string, any>;
 }
 
 export class UpdateWorkspaceDto {
-    @IsOptional()
-    @IsString()
-    name?: string;
+  @IsOptional()
+  @IsString()
+  name?: string;
 
-    @IsOptional()
-    @IsObject()
-    settings?: Record<string, any>;
+  @IsOptional()
+  @IsObject()
+  settings?: Record<string, any>;
 }
 
 export class AddWorkspaceUserDto {
-    @IsString()
-    userId: string;
+  @IsString()
+  userId: string;
 
-    @IsString()
-    role: 'ADMIN' | 'EDITOR' | 'VIEWER';
+  @IsString()
+  role: 'ADMIN' | 'EDITOR' | 'VIEWER';
 }

@@ -46,12 +46,12 @@ export class AiProcessingProducer {
       : { jobId: job.id };
   }
 
-  async enqueueAnalyzeText(
+  async enqueueAnalyzeContent(
     payload: AnalyzeTextPayload,
     waitForResult = false,
   ): Promise<Job | any> {
     const job = await this.queue.add(
-      JOBS_AI.analyzeText,
+      JOBS_AI.analyzeContent,
       payload,
       this.defaultOptions,
     );

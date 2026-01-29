@@ -8,21 +8,22 @@ import { JwtStrategy } from './strategies';
 import { DatabaseGrpcClient } from '../grpc';
 
 @Module({
-    imports: [
-        PassportModule.register({ defaultStrategy: 'jwt' }),
-        JwtModule.registerAsync({
-            imports: [ConfigModule],
-            useFactory: async (configService: ConfigService) => ({
-                secret: configService.get<string>('JWT_SECRET') || 'default-secret-change-me',
-                signOptions: {
-                    expiresIn: '15m',
-                },
-            }),
-            inject: [ConfigService],
-        }),
-    ],
-    controllers: [AuthController],
-    providers: [AuthService, JwtStrategy, DatabaseGrpcClient],
-    exports: [AuthService, JwtStrategy, DatabaseGrpcClient],
+  imports: [
+    PassportModule.register({ defaultStrategy: 'jwt' }),
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        secret:
+          configService.get<string>('JWT_SECRET') || 'default-secret-change-me',
+        signOptions: {
+          expiresIn: '15m',
+        },
+      }),
+      inject: [ConfigService],
+    }),
+  ],
+  controllers: [AuthController],
+  providers: [AuthService, JwtStrategy, DatabaseGrpcClient],
+  exports: [AuthService, JwtStrategy, DatabaseGrpcClient],
 })
-export class AuthModule { }
+export class AuthModule {}

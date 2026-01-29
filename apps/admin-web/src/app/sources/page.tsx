@@ -74,7 +74,7 @@ export default function SourcesPage() {
         setSyncResult(null);
 
         try {
-            const result = await api.syncSource(token, source.id, 10);
+            const result = await api.syncSource(token, source.id, 1);
             setSyncResult(result);
         } catch (error) {
             console.error('Failed to sync source:', error);

@@ -1,362 +1,627 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
 interface RequestOptions extends RequestInit {
-    token?: string;
+  token?: string;
 }
 
 class ApiClient {
-    private baseUrl: string;
+  private baseUrl: string;
 
-    constructor(baseUrl: string) {
-        this.baseUrl = baseUrl;
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl;
+  }
+
+  private async request<T>(
+    endpoint: string,
+    options: RequestOptions = {},
+  ): Promise<T> {
+    const { token, ...fetchOptions } = options;
+
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    };
+
+    if (token) {
+      (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
     }
 
-    private async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-        const { token, ...fetchOptions } = options;
+    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      ...fetchOptions,
+      headers,
+    });
 
-        const headers: HeadersInit = {
-            'Content-Type': 'application/json',
-            ...options.headers,
-        };
-
-        if (token) {
-            (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
-        }
-
-        const response = await fetch(`${this.baseUrl}${endpoint}`, {
-            ...fetchOptions,
-            headers,
-        });
-
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({ message: 'Request failed' }));
-            throw new Error(error.message || `HTTP ${response.status}`);
-        }
-
-        // Handle 204 No Content
-        if (response.status === 204) {
-            return {} as T;
-        }
-
-        return response.json();
+    if (!response.ok) {
+      const error = await response
+        .json()
+        .catch(() => ({ message: 'Request failed' }));
+      throw new Error(error.message || `HTTP ${response.status}`);
     }
 
-    // Auth
-    async login(email: string, password: string) {
-        return this.request<{ accessToken: string; refreshToken: string }>('/api/auth/login', {
-            method: 'POST',
-            body: JSON.stringify({ email, password }),
-        });
+    // Handle 204 No Content
+    if (response.status === 204) {
+      return {} as T;
     }
 
-    async register(email: string, password: string, name?: string) {
-        return this.request<{ accessToken: string; refreshToken: string }>('/api/auth/register', {
-            method: 'POST',
-            body: JSON.stringify({ email, password, name }),
-        });
-    }
+    return response.json();
+  }
 
-    async getProfile(token: string) {
-        return this.request<{ id: string; email: string; name: string; role: string }>('/api/auth/me', { token });
-    }
+  // Auth
+  async login(email: string, password: string) {
+    return this.request<{ accessToken: string; refreshToken: string }>(
+      '/api/auth/login',
+      {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      },
+    );
+  }
 
-    // Sources
-    async getSources(token: string, params?: { limit?: number; offset?: number; type?: string; activeOnly?: boolean }) {
-        const searchParams = new URLSearchParams();
-        if (params?.limit) searchParams.set('limit', params.limit.toString());
-        if (params?.offset) searchParams.set('offset', params.offset.toString());
-        if (params?.type) searchParams.set('type', params.type);
-        if (params?.activeOnly) searchParams.set('activeOnly', 'true');
-        const query = searchParams.toString() ? `?${searchParams}` : '';
-        return this.request<{ items: Source[]; total: number }>(`/api/sources${query}`, { token });
-    }
+  async register(email: string, password: string, name?: string) {
+    return this.request<{ accessToken: string; refreshToken: string }>(
+      '/api/auth/register',
+      {
+        method: 'POST',
+        body: JSON.stringify({ email, password, name }),
+      },
+    );
+  }
 
-    async getSource(token: string, id: string) {
-        return this.request<Source>(`/api/sources/${id}`, { token });
-    }
+  async getProfile(token: string) {
+    return this.request<{
+      id: string;
+      email: string;
+      name: string;
+      role: string;
+    }>('/api/auth/me', { token });
+  }
 
-    async createSource(token: string, data: CreateSourceData) {
-        return this.request<Source>('/api/sources', {
-            method: 'POST',
-            body: JSON.stringify(data),
-            token,
-        });
-    }
+  // Sources
+  async getSources(
+    token: string,
+    params?: {
+      limit?: number;
+      offset?: number;
+      type?: string;
+      activeOnly?: boolean;
+    },
+  ) {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.offset) searchParams.set('offset', params.offset.toString());
+    if (params?.type) searchParams.set('type', params.type);
+    if (params?.activeOnly) searchParams.set('activeOnly', 'true');
+    const query = searchParams.toString() ? `?${searchParams}` : '';
+    return this.request<{ items: Source[]; total: number }>(
+      `/api/sources${query}`,
+      { token },
+    );
+  }
 
-    async updateSource(token: string, id: string, data: UpdateSourceData) {
-        return this.request<Source>(`/api/sources/${id}`, {
-            method: 'PATCH',
-            body: JSON.stringify(data),
-            token,
-        });
-    }
+  async getSource(token: string, id: string) {
+    return this.request<Source>(`/api/sources/${id}`, { token });
+  }
 
-    async setSourceActive(token: string, id: string, isActive: boolean) {
-        return this.request<Source>(`/api/sources/${id}/active`, {
-            method: 'PATCH',
-            body: JSON.stringify({ isActive }),
-            token,
-        });
-    }
+  async createSource(token: string, data: CreateSourceData) {
+    return this.request<Source>('/api/sources', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      token,
+    });
+  }
 
-    async deleteSource(token: string, id: string) {
-        return this.request<void>(`/api/sources/${id}`, {
-            method: 'DELETE',
-            token,
-        });
-    }
+  async updateSource(token: string, id: string, data: UpdateSourceData) {
+    return this.request<Source>(`/api/sources/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+      token,
+    });
+  }
 
-    async syncSource(token: string, id: string, limit?: number) {
-        const query = limit ? `?limit=${limit}` : '';
-        return this.request<SyncResult>(`/api/sources/${id}/sync${query}`, {
-            method: 'POST',
-            token,
-        });
-    }
+  async setSourceActive(token: string, id: string, isActive: boolean) {
+    return this.request<Source>(`/api/sources/${id}/active`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive }),
+      token,
+    });
+  }
 
-    // Content
-    async getContents(token: string, params?: { limit?: number; offset?: number; sourceId?: string; status?: string }) {
-        const searchParams = new URLSearchParams();
-        if (params?.limit) searchParams.set('limit', params.limit.toString());
-        if (params?.offset) searchParams.set('offset', params.offset.toString());
-        if (params?.sourceId) searchParams.set('sourceId', params.sourceId);
-        if (params?.status) searchParams.set('status', params.status);
-        const query = searchParams.toString() ? `?${searchParams}` : '';
-        return this.request<{ items: Content[]; total: number }>(`/api/content${query}`, { token });
-    }
+  async deleteSource(token: string, id: string) {
+    return this.request<void>(`/api/sources/${id}`, {
+      method: 'DELETE',
+      token,
+    });
+  }
 
-    async getContent(token: string, id: string) {
-        return this.request<Content>(`/api/content/${id}`, { token });
-    }
-    // Workspaces
-    async getWorkspaces(token: string) {
-        return this.request<Workspace[]>('/api/workspaces', { token });
-    }
+  async syncSource(token: string, id: string, limit?: number) {
+    const query = limit ? `?limit=${limit}` : '';
+    return this.request<SyncResult>(`/api/sources/${id}/sync${query}`, {
+      method: 'POST',
+      token,
+    });
+  }
 
-    async getWorkspace(token: string, id: string) {
-        return this.request<Workspace>(`/api/workspaces/${id}`, { token });
-    }
+  // Content
+  async getContents(
+    token: string,
+    params?: {
+      limit?: number;
+      offset?: number;
+      sourceId?: string;
+      status?: string;
+    },
+  ) {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.offset) searchParams.set('offset', params.offset.toString());
+    if (params?.sourceId) searchParams.set('sourceId', params.sourceId);
+    if (params?.status) searchParams.set('status', params.status);
+    const query = searchParams.toString() ? `?${searchParams}` : '';
+    return this.request<{ items: Content[]; total: number }>(
+      `/api/content${query}`,
+      { token },
+    );
+  }
 
-    async createWorkspace(token: string, data: { name: string; settings?: Record<string, unknown> }) {
-        return this.request<Workspace>('/api/workspaces', {
-            method: 'POST',
-            body: JSON.stringify(data),
-            token,
-        });
-    }
+  async getContent(token: string, id: string) {
+    return this.request<Content>(`/api/content/${id}`, { token });
+  }
 
-    async updateWorkspace(token: string, id: string, data: { name?: string; settings?: Record<string, unknown> }) {
-        return this.request<Workspace>(`/api/workspaces/${id}`, {
-            method: 'PATCH',
-            body: JSON.stringify(data),
-            token,
-        });
-    }
+  async getRawContents(
+    token: string,
+    params?: {
+      limit?: number;
+      offset?: number;
+      status?: string;
+      sourceId?: string;
+    },
+  ) {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.offset) searchParams.set('offset', params.offset.toString());
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.sourceId) searchParams.set('sourceId', params.sourceId);
+    const query = searchParams.toString() ? `?${searchParams}` : '';
+    return this.request<{ items: RawContent[]; total: number }>(
+      `/api/raw-content${query}`,
+      { token },
+    );
+  }
 
-    async deleteWorkspace(token: string, id: string) {
-        return this.request<void>(`/api/workspaces/${id}`, {
-            method: 'DELETE',
-            token,
-        });
-    }
+  async getContentUnits(
+    token: string,
+    params?: {
+      limit?: number;
+      offset?: number;
+      rawContentId?: string;
+      minQualityScore?: number;
+    },
+  ) {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.offset) searchParams.set('offset', params.offset.toString());
+    if (params?.rawContentId) searchParams.set('rawContentId', params.rawContentId);
+    if (params?.minQualityScore) searchParams.set('minQualityScore', params.minQualityScore.toString());
+    const query = searchParams.toString() ? `?${searchParams}` : '';
+    return this.request<{ items: ContentUnit[]; total: number }>(
+      `/api/content-units${query}`,
+      { token },
+    );
+  }
 
-    // Workspace Donors
-    async getWorkspaceDonors(token: string, workspaceId: string, activeOnly?: boolean) {
-        const query = activeOnly ? '?activeOnly=true' : '';
-        return this.request<WorkspaceDonor[]>(`/api/workspaces/${workspaceId}/donors${query}`, { token });
-    }
+  async getTopics(
+    token: string,
+    params?: {
+      limit?: number;
+      offset?: number;
+      type?: string;
+      categoryId?: string;
+      activeOnly?: boolean;
+    },
+  ) {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.offset) searchParams.set('offset', params.offset.toString());
+    if (params?.type) searchParams.set('type', params.type);
+    if (params?.categoryId) searchParams.set('categoryId', params.categoryId);
+    if (params?.activeOnly) searchParams.set('activeOnly', 'true');
+    const query = searchParams.toString() ? `?${searchParams}` : '';
+    return this.request<{ items: Topic[]; total: number }>(
+      `/api/topics${query}`,
+      { token },
+    );
+  }
+  // Workspaces
+  async getWorkspaces(token: string) {
+    return this.request<Workspace[]>('/api/workspaces', { token });
+  }
 
-    async addWorkspaceDonor(token: string, workspaceId: string, sourceId: string, settings?: Record<string, unknown>) {
-        return this.request<WorkspaceDonor>(`/api/workspaces/${workspaceId}/donors`, {
-            method: 'POST',
-            body: JSON.stringify({ sourceId, settings }),
-            token,
-        });
-    }
+  async getWorkspace(token: string, id: string) {
+    return this.request<Workspace>(`/api/workspaces/${id}`, { token });
+  }
 
-    async updateWorkspaceDonor(token: string, workspaceId: string, sourceId: string, data: { isActive?: boolean; settings?: Record<string, unknown> }) {
-        return this.request<WorkspaceDonor>(`/api/workspaces/${workspaceId}/donors/${sourceId}`, {
-            method: 'PATCH',
-            body: JSON.stringify(data),
-            token,
-        });
-    }
+  async createWorkspace(
+    token: string,
+    data: { name: string; settings?: Record<string, unknown> },
+  ) {
+    return this.request<Workspace>('/api/workspaces', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      token,
+    });
+  }
 
-    async removeWorkspaceDonor(token: string, workspaceId: string, sourceId: string) {
-        return this.request<void>(`/api/workspaces/${workspaceId}/donors/${sourceId}`, {
-            method: 'DELETE',
-            token,
-        });
-    }
+  async updateWorkspace(
+    token: string,
+    id: string,
+    data: { name?: string; settings?: Record<string, unknown> },
+  ) {
+    return this.request<Workspace>(`/api/workspaces/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+      token,
+    });
+  }
 
-    // Targets
-    async getTargets(token: string, workspaceId: string, params?: { activeOnly?: boolean; type?: string }) {
-        const searchParams = new URLSearchParams();
-        if (params?.activeOnly) searchParams.set('activeOnly', 'true');
-        if (params?.type) searchParams.set('type', params.type);
-        const query = searchParams.toString() ? `?${searchParams}` : '';
-        return this.request<{ targets: Target[]; total: number }>(`/api/workspaces/${workspaceId}/targets${query}`, { token });
-    }
+  async deleteWorkspace(token: string, id: string) {
+    return this.request<void>(`/api/workspaces/${id}`, {
+      method: 'DELETE',
+      token,
+    });
+  }
 
-    async getTarget(token: string, workspaceId: string, targetId: string) {
-        return this.request<Target>(`/api/workspaces/${workspaceId}/targets/${targetId}`, { token });
-    }
+  // Workspace Donors
+  async getWorkspaceDonors(
+    token: string,
+    workspaceId: string,
+    activeOnly?: boolean,
+  ) {
+    const query = activeOnly ? '?activeOnly=true' : '';
+    return this.request<WorkspaceDonor[]>(
+      `/api/workspaces/${workspaceId}/donors${query}`,
+      { token },
+    );
+  }
 
-    async createTarget(token: string, workspaceId: string, data: CreateTargetData) {
-        return this.request<Target>(`/api/workspaces/${workspaceId}/targets`, {
-            method: 'POST',
-            body: JSON.stringify(data),
-            token,
-        });
-    }
+  async addWorkspaceDonor(
+    token: string,
+    workspaceId: string,
+    sourceId: string,
+    settings?: Record<string, unknown>,
+  ) {
+    return this.request<WorkspaceDonor>(
+      `/api/workspaces/${workspaceId}/donors`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ sourceId, settings }),
+        token,
+      },
+    );
+  }
 
-    async updateTarget(token: string, workspaceId: string, targetId: string, data: UpdateTargetData) {
-        return this.request<Target>(`/api/workspaces/${workspaceId}/targets/${targetId}`, {
-            method: 'PATCH',
-            body: JSON.stringify(data),
-            token,
-        });
-    }
+  async updateWorkspaceDonor(
+    token: string,
+    workspaceId: string,
+    sourceId: string,
+    data: { isActive?: boolean; settings?: Record<string, unknown> },
+  ) {
+    return this.request<WorkspaceDonor>(
+      `/api/workspaces/${workspaceId}/donors/${sourceId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+        token,
+      },
+    );
+  }
 
-    async deleteTarget(token: string, workspaceId: string, targetId: string) {
-        return this.request<void>(`/api/workspaces/${workspaceId}/targets/${targetId}`, {
-            method: 'DELETE',
-            token,
-        });
-    }
+  async removeWorkspaceDonor(
+    token: string,
+    workspaceId: string,
+    sourceId: string,
+  ) {
+    return this.request<void>(
+      `/api/workspaces/${workspaceId}/donors/${sourceId}`,
+      {
+        method: 'DELETE',
+        token,
+      },
+    );
+  }
+
+  // Targets
+  async getTargets(
+    token: string,
+    workspaceId: string,
+    params?: { activeOnly?: boolean; type?: string },
+  ) {
+    const searchParams = new URLSearchParams();
+    if (params?.activeOnly) searchParams.set('activeOnly', 'true');
+    if (params?.type) searchParams.set('type', params.type);
+    const query = searchParams.toString() ? `?${searchParams}` : '';
+    return this.request<{ targets: Target[]; total: number }>(
+      `/api/workspaces/${workspaceId}/targets${query}`,
+      { token },
+    );
+  }
+
+  async getTarget(token: string, workspaceId: string, targetId: string) {
+    return this.request<Target>(
+      `/api/workspaces/${workspaceId}/targets/${targetId}`,
+      { token },
+    );
+  }
+
+  async createTarget(
+    token: string,
+    workspaceId: string,
+    data: CreateTargetData,
+  ) {
+    return this.request<Target>(`/api/workspaces/${workspaceId}/targets`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+      token,
+    });
+  }
+
+  async updateTarget(
+    token: string,
+    workspaceId: string,
+    targetId: string,
+    data: UpdateTargetData,
+  ) {
+    return this.request<Target>(
+      `/api/workspaces/${workspaceId}/targets/${targetId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+        token,
+      },
+    );
+  }
+
+  async deleteTarget(token: string, workspaceId: string, targetId: string) {
+    return this.request<void>(
+      `/api/workspaces/${workspaceId}/targets/${targetId}`,
+      {
+        method: 'DELETE',
+        token,
+      },
+    );
+  }
+
+  // AI Prompts
+  async getAiPrompts(
+    token: string,
+    params?: { provider?: string; category?: string; activeOnly?: boolean },
+  ) {
+    const searchParams = new URLSearchParams();
+    if (params?.provider) searchParams.set('provider', params.provider);
+    if (params?.category) searchParams.set('category', params.category);
+    if (params?.activeOnly) searchParams.set('activeOnly', 'true');
+    const query = searchParams.toString() ? `?${searchParams}` : '';
+    return this.request<any[]>(`/api/ai-prompts${query}`, { token });
+  }
+
+  async createAiPrompt(token: string, data: any) {
+    return this.request<any>('/api/ai-prompts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      token,
+    });
+  }
+
+  async updateAiPrompt(token: string, id: string, data: any) {
+    return this.request<any>(`/api/ai-prompts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+      token,
+    });
+  }
+
+  async toggleAiPrompt(token: string, id: string, isActive: boolean) {
+    return this.request<any>(`/api/ai-prompts/${id}/toggle`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive }),
+      token,
+    });
+  }
+
+  async deleteAiPrompt(token: string, id: string) {
+    return this.request<void>(`/api/ai-prompts/${id}`, {
+      method: 'DELETE',
+      token,
+    });
+  }
 }
 
 // Types
 export interface Source {
-    id: string;
-    type: string;
-    external_id: string;
-    name: string;
-    description: string;
-    avatar_url: string;
-    url: string;
-    is_active: boolean;
-    language: string;
-    metadata_json: string;
-    created_at: string;
-    updated_at: string;
+  id: string;
+  type: string;
+  external_id: string;
+  name: string;
+  description: string;
+  avatar_url: string;
+  url: string;
+  is_active: boolean;
+  language: string;
+  metadata_json: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CreateSourceData {
-    type: string;
-    externalId: string;
-    name?: string;
-    description?: string;
-    avatarUrl?: string;
-    url?: string;
-    language?: string;
-    metadata?: Record<string, unknown>;
+  type: string;
+  externalId: string;
+  name?: string;
+  description?: string;
+  avatarUrl?: string;
+  url?: string;
+  language?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface UpdateSourceData {
-    name?: string;
-    description?: string;
-    avatarUrl?: string;
-    url?: string;
-    language?: string;
-    metadata?: Record<string, unknown>;
+  name?: string;
+  description?: string;
+  avatarUrl?: string;
+  url?: string;
+  language?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface SyncResult {
-    sourceId: string;
-    sourceName: string;
-    messagesProcessed: number;
-    contentCreated: number;
-    contentSkipped: number;
-    errors: string[];
-    startedAt: string;
-    finishedAt: string;
-    durationMs: number;
+  sourceId: string;
+  sourceName: string;
+  messagesProcessed: number;
+  contentCreated: number;
+  contentSkipped: number;
+  errors: string[];
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
 }
 
 export interface Content {
-    id: string;
-    externalId: string;
-    text: string;
-    sourceId: string;
-    receivedViaId: string;
-    qdrantId: string;
-    isVectorized: boolean; // Note: backend returns snake_case in raw response but core controller formats to camelCase
-    embeddingModel: string;
-    status: string;
-    aiAnalysis: any;
-    rawData: any;
-    createdAt: string;
-    updatedAt: string;
+  id: string;
+  externalId: string;
+  text: string;
+  sourceId: string;
+  receivedViaId: string;
+  qdrantId: string;
+  isVectorized: boolean; // Note: backend returns snake_case in raw response but core controller formats to camelCase
+  embeddingModel: string;
+  status: string;
+  aiAnalysis: any;
+  rawData: any;
+  createdAt: string;
+  updatedAt: string;
+  rawContent?: RawContent;
+  contentUnits?: ContentUnit[];
+}
+
+export interface RawContent {
+  id: string;
+  sourceId: string;
+  externalId: string;
+  text: string;
+  media: any;
+  urls: any;
+  sourceMeta: any;
+  status: string;
+  receivedAt: string;
+  processedAt: string;
+  createdAt: string;
+  contentUnits?: ContentUnit[];
+}
+
+export interface ContentUnit {
+  id: string;
+  rawContentId: string;
+  unitIndex: number;
+  qualityScore: number;
+  qualityReasoning: string;
+  originalText: string;
+  contentType: string;
+  categories: any[];
+  summary: string;
+  sentiment: string;
+  keywords: string[];
+  language: string;
+  entities: any;
+  linkedMediaIndexes: number[];
+  needsFactCheck: boolean;
+  factCheckHint: any;
+  factCheckResult: any;
+  qdrantId: string;
+  topicId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Topic {
+  id: string;
+  type: string;
+  title: string;
+  summary: string;
+  language: string;
+  categoryId: string;
+  version: number;
+  relevanceScore: number;
+  isExpired: boolean;
+  factCheckStatus: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Workspace {
-    id: string;
-    name: string;
-    owner_id: string;
-    settings_json: string;
-    created_at: string;
-    updated_at: string;
+  id: string;
+  name: string;
+  owner_id: string;
+  settings_json: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface WorkspaceDonor {
-    id: string;
-    workspace_id: string;
-    source_id: string;
-    is_active: boolean;
-    settings_json: string;
-    created_at: string;
-    source_type: string;
-    source_external_id: string;
-    source_name: string;
+  id: string;
+  workspace_id: string;
+  source_id: string;
+  is_active: boolean;
+  settings_json: string;
+  created_at: string;
+  source_type: string;
+  source_external_id: string;
+  source_name: string;
 }
 
 export interface Target {
-    id: string;
-    workspace_id: string;
-    type: string;
-    external_id: string;
-    name: string;
-    description: string;
-    language: string;
-    timezone: string;
-    max_posts_per_day: number;
-    min_post_interval: number;
-    settings_json: string;
-    work_schedule_json: string;
-    account_id: string;
-    is_active: boolean;
-    metadata_json: string;
-    created_at: string;
-    updated_at: string;
+  id: string;
+  workspace_id: string;
+  type: string;
+  external_id: string;
+  name: string;
+  description: string;
+  language: string;
+  timezone: string;
+  max_posts_per_day: number;
+  min_post_interval: number;
+  settings_json: string;
+  work_schedule_json: string;
+  account_id: string;
+  is_active: boolean;
+  metadata_json: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CreateTargetData {
-    type: string;
-    externalId: string;
-    name?: string;
-    description?: string;
-    language?: string;
-    timezone?: string;
-    maxPostsPerDay?: number;
-    minPostInterval?: number;
-    settings?: Record<string, unknown>;
-    workSchedule?: Record<string, unknown>;
-    accountId?: string;
+  type: string;
+  externalId: string;
+  name?: string;
+  description?: string;
+  language?: string;
+  timezone?: string;
+  maxPostsPerDay?: number;
+  minPostInterval?: number;
+  settings?: Record<string, unknown>;
+  workSchedule?: Record<string, unknown>;
+  accountId?: string;
 }
 
 export interface UpdateTargetData {
-    name?: string;
-    description?: string;
-    language?: string;
-    timezone?: string;
-    maxPostsPerDay?: number;
-    minPostInterval?: number;
-    settings?: Record<string, unknown>;
-    workSchedule?: Record<string, unknown>;
-    accountId?: string;
-    isActive?: boolean;
-    metadata?: Record<string, unknown>;
+  name?: string;
+  description?: string;
+  language?: string;
+  timezone?: string;
+  maxPostsPerDay?: number;
+  minPostInterval?: number;
+  settings?: Record<string, unknown>;
+  workSchedule?: Record<string, unknown>;
+  accountId?: string;
+  isActive?: boolean;
+  metadata?: Record<string, unknown>;
 }
 
 export const api = new ApiClient(API_BASE_URL);

@@ -8,9 +8,9 @@ export const QUEUE_DATABASE_STORAGE = 'database-storage';
 
 // Типы заданий
 export const JOBS_DATABASE = {
-    saveContent: 'save-content',
-    updateVector: 'update-vector',
-    updateAiAnalysis: 'update-ai-analysis',
+  saveContent: 'save-content',
+  updateVector: 'update-vector',
+  updateAiAnalysis: 'update-ai-analysis',
 } as const;
 
 // ===========================================
@@ -21,30 +21,30 @@ export const JOBS_DATABASE = {
  * Сохранение нового контента
  */
 export interface SaveContentPayload {
-    sourceType: string;        // 'telegram', 'twitter', etc.
-    sourceExternalId: string;  // channel username
-    sourceName?: string;       // Human-readable name
+  sourceType: string; // 'telegram', 'twitter', etc.
+  sourceExternalId: string; // channel username
+  sourceName?: string; // Human-readable name
 
-    externalId?: string;       // Message ID from source
-    text?: string;             // Text content
-    rawData?: Record<string, unknown>; // Full raw data
-    sourceDate?: string;       // ISO date string
+  externalId?: string; // Message ID from source
+  text?: string; // Text content
+  rawData?: Record<string, unknown>; // Full raw data
+  sourceDate?: string; // ISO date string
 }
 
 /**
  * Обновление вектора для контента
  */
 export interface UpdateVectorPayload {
-    contentId: string;         // UUID контента в нашей БД
-    vector: number[];          // Embedding вектор
+  contentId: string; // UUID контента в нашей БД
+  vector: number[]; // Embedding вектор
 }
 
 /**
  * Обновление результата AI анализа
  */
 export interface UpdateAiAnalysisPayload {
-    contentId: string;
-    analysis: Record<string, unknown>;
+  contentId: string;
+  analysis: Record<string, unknown>;
 }
 
 // ===========================================
@@ -52,7 +52,7 @@ export interface UpdateAiAnalysisPayload {
 // ===========================================
 
 export interface ContentCreatedResponse {
-    id: string;
-    sourceId: string;
-    qdrantId: string | null;
+  id: string;
+  sourceId: string;
+  qdrantId: string | null;
 }

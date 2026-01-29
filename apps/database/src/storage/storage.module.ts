@@ -3,7 +3,7 @@ import { PrismaService } from './prisma.service';
 import { QdrantService } from './qdrant.service';
 
 @Module({
-    providers: [PrismaService, QdrantService],
-    exports: [PrismaService, QdrantService],
+  providers: [PrismaService, QdrantService],
+  exports: [PrismaService, QdrantService],
 })
-export class StorageModule { }
+export class StorageModule {}

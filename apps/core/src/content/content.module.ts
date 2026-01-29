@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ContentController } from './content.controller';
+import { RawContentController } from './raw-content.controller';
+import { ContentUnitsController } from './content-units.controller';
 import { DatabaseGrpcClient } from '../grpc';
 import { AuthModule } from '../auth';
 
 @Module({
-    imports: [AuthModule],
-    controllers: [ContentController],
-    providers: [DatabaseGrpcClient],
+  imports: [AuthModule],
+  controllers: [ContentController, RawContentController, ContentUnitsController],
+  providers: [DatabaseGrpcClient],
 })
 export class ContentModule { }

@@ -26,6 +26,12 @@
       ],
       "@queue-contracts/*": [
         "libs/queue-contracts/src/*"
+      ],
+      "@storage": [
+        "libs/storage/src/index"
+      ],
+      "@storage/*": [
+        "libs/storage/src/*"
       ]
     }
   }

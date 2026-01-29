@@ -8,13 +8,13 @@ import { PipelineService } from './pipeline.service';
 
 @Controller('pipeline')
 export class PipelineController {
-    constructor(private readonly pipelineService: PipelineService) { }
+  constructor(private readonly pipelineService: PipelineService) {}
 
-    // Deprecated: PipelineService.processChannel() больше не существует
-    // Используйте /api/sources/:id/sync вместо этого
+  // Deprecated: PipelineService.processChannel() больше не существует
+  // Используйте /api/sources/:id/sync вместо этого
 
-    // @Post('channel')
-    // async processChannel(@Body() body: ProcessChannelDto) {
-    //     return await this.pipelineService.processContent(...);
-    // }
+  // @Post('channel')
+  // async processChannel(@Body() body: ProcessChannelDto) {
+  //     return await this.pipelineService.processContent(...);
+  // }
 }

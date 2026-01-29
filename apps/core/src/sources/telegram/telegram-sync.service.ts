@@ -1,74 +1,127 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { DatabaseGrpcClient } from '../../grpc';
+import { DatabaseGrpcClient, SourceResponse } from '../../grpc';
 import { TelegramParseProducer } from '../../queues/telegram-parse.producer';
-import { PipelineService } from '../../pipeline/pipeline.service';
-import { SourceSyncService, SyncOptions, SyncResult } from '../sync/source-sync.interface';
+import {
+  SourceSyncService,
+  SyncOptions,
+  FetchMessagesResult,
+  SyncMessage,
+} from '../sync/source-sync.interface';
 
+/**
+ * TelegramSyncService — адаптер для получения сообщений из Telegram.
+ *
+ * Ответственность (Single Responsibility):
+ * - ТОЛЬКО получение сообщений из Telegram API
+ * - Работа с lastSyncedMessageId (incremental sync)
+ * - Возврат SyncMessage[] (унифицированный формат)
+ *
+ * НЕ отвечает за:
+ * - Создание RawContent (это делает SourceSyncOrchestrator)
+ * - Проверку дубликатов (это делает SourceSyncOrchestrator)
+ * - Добавление в очередь (это делает SourceSyncOrchestrator)
+ */
 @Injectable()
 export class TelegramSyncService implements SourceSyncService {
-    private readonly logger = new Logger(TelegramSyncService.name);
+  private readonly logger = new Logger(TelegramSyncService.name);
 
-    constructor(
-        private readonly dbClient: DatabaseGrpcClient,
-        private readonly telegramProducer: TelegramParseProducer,
-        private readonly pipelineService: PipelineService,
-    ) { }
+  constructor(
+    private readonly dbClient: DatabaseGrpcClient,
+    private readonly telegramProducer: TelegramParseProducer,
+  ) { }
 
-    async syncSource(sourceId: string, options: SyncOptions): Promise<SyncResult> {
-        const startTime = Date.now();
-
-        // 1. Получить source
-        const source = await this.dbClient.getSource(sourceId);
-
-        if (!source) {
-            throw new Error(`Source not found: ${sourceId}`);
-        }
-
-        if (source.type !== 'telegram') {
-            throw new Error(`TelegramSyncService can only sync telegram sources, got: ${source.type}`);
-        }
-
-        this.logger.log(`Starting Telegram sync for: ${source.name || source.external_id}`);
-
-        // 2. Определить peer (username или channel ID)
-        const peer = this.resolvePeer(source);
-
-        // 3. Получить сообщения через Telegram Producer
-        const result = await this.telegramProducer.getMessagesJob({
-            peer,
-            limit: options.limit || 50,
-            offsetId: 0,
-        });
-
-        this.logger.log(`Fetched ${result.messages.length} messages from Telegram`);
-
-        // 4. Обработать через универсальный Pipeline
-        const stats = await this.pipelineService.processContent(source, result.messages);
-
-        // 5. Обновить last_sync_at
-        await this.dbClient.updateSource(source.id, {
-            lastSyncAt: new Date().toISOString(),
-        });
-
-        // 6. Вернуть результат
-        return {
-            sourceId: source.id,
-            sourceName: source.name || source.external_id,
-            messagesProcessed: result.messages.length,
-            contentCreated: stats.created,
-            contentSkipped: stats.skipped,
-            errors: stats.errors,
-            startedAt: new Date(startTime).toISOString(),
-            finishedAt: new Date().toISOString(),
-            durationMs: Date.now() - startTime,
-        };
+  /**
+   * Получить сообщения из Telegram (ТОЛЬКО получение, без создания RawContent)
+   *
+   * Поддерживает incremental sync через lastSyncedMessageId в metadata
+   */
+  async fetchMessages(
+    sourceId: string,
+    options: SyncOptions,
+  ): Promise<FetchMessagesResult> {
+    // 1. Получить source
+    const source = await this.dbClient.getSource(sourceId);
+    if (!source) {
+      throw new Error(`Source not found: ${sourceId}`);
     }
 
-    /**
-     * Определить peer: username из metadata или external_id как channel ID
-     */
-    private resolvePeer(source: any): string {
-        const metadata = source.metadata_json ? JSON.parse(source.metadata_json) : {};
-        return metadata.username || source.external_id;
+    if (source.type !== 'telegram') {
+      throw new Error(
+        `TelegramSyncService can only sync telegram sources, got: ${source.type}`,
+      );
     }
+
+    // 2. Определить peer
+    const peer = this.resolvePeer(source);
+
+    // 3. Прочитать metadata для incremental sync (Уровень 1 защиты)
+    const metadata = source.metadata_json
+      ? JSON.parse(source.metadata_json)
+      : {};
+
+    const lastMessageId = metadata.lastSyncedMessageId || 0;
+
+    this.logger.log(
+      `Fetching messages from Telegram (lastMessageId: ${lastMessageId}, limit: ${options.limit || 100})`,
+    );
+
+    // 4. Получить сообщения из Telegram API
+    const result = await this.telegramProducer.getMessagesJob({
+      peer,
+      limit: options.limit || 100,
+      offsetId: lastMessageId, // ✨ incremental sync
+    });
+
+    // 5. Фильтровать только новые (ID > lastMessageId)
+    const newMessages = result.messages.filter(
+      (msg) => parseInt(msg.id) > lastMessageId,
+    );
+
+    this.logger.log(`Received ${newMessages.length} new messages from Telegram`);
+
+    // 6. Конвертировать в унифицированный формат SyncMessage[]
+    const syncMessages: SyncMessage[] = newMessages.map((msg) => ({
+      id: msg.id.toString(),
+      text: msg.message || '',
+      media: msg.media,
+      sourceMeta: {
+        messageId: msg.id,
+        date: msg.date,
+        views: msg.views,
+        forwards: msg.forwards,
+        editDate: msg.editDate,
+      },
+      receivedAt: msg.date ? new Date(msg.date * 1000) : new Date(),
+    }));
+
+    // 7. Определить новый lastSyncedMessageId
+    const newLastMessageId = newMessages.length > 0
+      ? Math.max(...newMessages.map((m) => parseInt(m.id)))
+      : lastMessageId;
+
+    // 8. Обновить metadata (специфично для Telegram)
+    if (newLastMessageId > lastMessageId) {
+      await this.dbClient.updateSource(source.id, {
+        metadata: {
+          ...metadata,
+          lastSyncedMessageId: newLastMessageId,
+        },
+      });
+    }
+
+    return {
+      messages: syncMessages,
+      lastSyncedMessageId: newLastMessageId.toString(),
+    };
+  }
+
+  /**
+   * Определить peer: username из metadata или external_id как channel ID
+   */
+  private resolvePeer(source: SourceResponse): string {
+    const metadata = source.metadata_json
+      ? JSON.parse(source.metadata_json)
+      : {};
+    return metadata.username || source.external_id;
+  }
 }

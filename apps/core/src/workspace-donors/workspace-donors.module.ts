@@ -4,8 +4,8 @@ import { WorkspaceDonorsService } from './workspace-donors.service';
 import { DatabaseGrpcClient } from '../grpc';
 
 @Module({
-    controllers: [WorkspaceDonorsController],
-    providers: [WorkspaceDonorsService, DatabaseGrpcClient],
-    exports: [WorkspaceDonorsService],
+  controllers: [WorkspaceDonorsController],
+  providers: [WorkspaceDonorsService, DatabaseGrpcClient],
+  exports: [WorkspaceDonorsService],
 })
-export class WorkspaceDonorsModule { }
+export class WorkspaceDonorsModule {}

@@ -4,8 +4,8 @@ import { TargetsService } from './targets.service';
 import { DatabaseGrpcClient } from '../grpc';
 
 @Module({
-    controllers: [TargetsController],
-    providers: [TargetsService, DatabaseGrpcClient],
-    exports: [TargetsService],
+  controllers: [TargetsController],
+  providers: [TargetsService, DatabaseGrpcClient],
+  exports: [TargetsService],
 })
-export class TargetsModule { }
+export class TargetsModule {}

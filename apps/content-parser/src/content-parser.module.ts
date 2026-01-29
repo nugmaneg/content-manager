@@ -5,10 +5,12 @@ import { ContentParserService } from './content-parser.service';
 import { SourcesModule } from './sources/sources.module';
 import { QueuesModule } from './queues/queues.module';
 import { LoggerMiddleware } from '@logger';
+import { StorageModule } from '@storage';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    StorageModule,
     QueuesModule,
     SourcesModule,
   ],

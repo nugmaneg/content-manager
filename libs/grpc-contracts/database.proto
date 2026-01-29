@@ -15,6 +15,24 @@ service DatabaseService {
   rpc GetLastContentForSource (GetLastContentForSourceRequest) returns (ContentResponse);
   rpc UpsertContentVector (UpsertContentVectorRequest) returns (UpsertContentVectorResponse);
 
+  // === RAW CONTENT ===
+  rpc CreateRawContent (CreateRawContentRequest) returns (RawContentResponse);
+  rpc GetRawContent (GetRawContentRequest) returns (RawContentResponse);
+  rpc UpdateRawContentStatus (UpdateRawContentStatusRequest) returns (RawContentResponse);
+  rpc ListPendingRawContent (ListPendingRawContentRequest) returns (ListRawContentResponse);
+  rpc ListRawContent (ListRawContentRequest) returns (ListRawContentResponse);
+  rpc CheckRawContentExists (CheckRawContentExistsRequest) returns (CheckRawContentExistsResponse);
+
+  // === CONTENT UNIT ===
+  rpc CreateContentUnit (CreateContentUnitRequest) returns (ContentUnitResponse);
+  rpc CreateContentUnits (CreateContentUnitsRequest) returns (CreateContentUnitsResponse);
+  rpc GetContentUnit (GetContentUnitRequest) returns (ContentUnitResponse);
+  rpc ListContentUnits (ListContentUnitsRequest) returns (ListContentUnitsResponse);
+  rpc UpdateContentUnitVector (UpdateContentUnitVectorRequest) returns (ContentUnitResponse);
+  rpc UpsertContentUnitVector (UpsertContentUnitVectorRequest) returns (UpsertContentUnitVectorResponse);
+  rpc UpdateContentUnitTopic (UpdateContentUnitTopicRequest) returns (ContentUnitResponse);
+  rpc SearchSimilarUnits (SearchSimilarUnitsRequest) returns (SearchSimilarUnitsResponse);
+
   // === SOURCE ===
   rpc GetSource (GetSourceRequest) returns (SourceResponse);
   rpc GetSourceByExternalId (GetSourceByExternalIdRequest) returns (SourceResponse);
@@ -73,6 +91,17 @@ service DatabaseService {
   rpc CreateTarget (CreateTargetRequest) returns (TargetResponse);
   rpc UpdateTarget (UpdateTargetRequest) returns (TargetResponse);
   rpc DeleteTarget (DeleteTargetRequest) returns (Empty);
+
+  // === AI PROMPTS ===
+  rpc ListAiPrompts (ListAiPromptsRequest) returns (ListAiPromptsResponse);
+  rpc GetAiPrompt (GetAiPromptRequest) returns (AiPromptResponse);
+  rpc GetAiPromptByKey (GetAiPromptByKeyRequest) returns (AiPromptResponse);
+  rpc CreateAiPrompt (CreateAiPromptRequest) returns (AiPromptResponse);
+  rpc UpdateAiPrompt (UpdateAiPromptRequest) returns (AiPromptResponse);
+  rpc ToggleAiPrompt (ToggleAiPromptRequest) returns (AiPromptResponse);
+  rpc DeleteAiPrompt (DeleteAiPromptRequest) returns (Empty);
+  rpc GetAiPromptVersions (GetAiPromptVersionsRequest) returns (AiPromptVersionsResponse);
+  rpc IncrementAiPromptUsage (IncrementAiPromptUsageRequest) returns (Empty);
 }
 
 // ===========================================
@@ -94,6 +123,8 @@ message ContentResponse {
   string updated_at = 10;
   string raw_data_json = 11;
   string ai_analysis_json = 12;
+  RawContentResponse raw_content = 13;
+  repeated ContentUnitResponse content_units = 14;
 }
 
 message GetContentRequest {
@@ -596,5 +627,270 @@ message DeleteTargetRequest {
   string id = 1;
 }
 
-message Empty {}
+// --- AI PROMPT ---
 
+message AiPromptResponse {
+  string id = 1;
+  string key = 2;
+  string name = 3;
+  string description = 4;
+  string template = 5;
+  string provider = 6;
+  string category = 7;
+  int32 version = 8;
+  bool is_active = 9;
+  int32 usage_count = 10;
+  string last_used_at = 11;
+  string model_settings_json = 12;
+  string variant_group = 13;
+  string variant_name = 14;
+  string created_by_id = 15;
+  string created_at = 16;
+  string updated_at = 17;
+}
+
+message AiPromptVersionResponse {
+  string id = 1;
+  string prompt_id = 2;
+  int32 version = 3;
+  string template = 4;
+  string change_note = 5;
+  string changed_by = 6;
+  string created_at = 7;
+}
+
+message ListAiPromptsRequest {
+  string provider = 1;
+  string category = 2;
+  bool active_only = 3;
+}
+
+message ListAiPromptsResponse {
+  repeated AiPromptResponse prompts = 1;
+}
+
+message GetAiPromptRequest {
+  string id = 1;
+}
+
+message GetAiPromptByKeyRequest {
+  string key = 1;
+}
+
+message CreateAiPromptRequest {
+  string key = 1;
+  string name = 2;
+  string description = 3;
+  string template = 4;
+  string provider = 5;
+  string category = 6;
+  string model_settings_json = 7;
+  string variant_group = 8;
+  string variant_name = 9;
+  string created_by_id = 10;
+}
+
+message UpdateAiPromptRequest {
+  string id = 1;
+  string template = 2;
+  string change_note = 3;
+  string changed_by = 4;
+}
+
+message ToggleAiPromptRequest {
+  string id = 1;
+  bool is_active = 2;
+}
+
+message DeleteAiPromptRequest {
+  string id = 1;
+}
+
+message GetAiPromptVersionsRequest {
+  string id = 1;
+}
+
+message AiPromptVersionsResponse {
+  string prompt_key = 1;
+  string prompt_name = 2;
+  repeated AiPromptVersionResponse versions = 3;
+}
+
+message IncrementAiPromptUsageRequest {
+  string id = 1;
+}
+
+// --- RAW CONTENT ---
+
+message RawContentResponse {
+  string id = 1;
+  string source_id = 2;
+  string external_id = 3;
+  string text = 4;
+  string media_json = 5;
+  string urls_json = 6;
+  string source_meta_json = 7;
+  string status = 8;
+  string received_at = 9;
+  string processed_at = 10;
+  string created_at = 11;
+  repeated ContentUnitResponse content_units = 12;
+}
+
+message CreateRawContentRequest {
+  string source_id = 1;
+  string external_id = 2;
+  string text = 3;
+  string media_json = 4;       // JSON array of MediaAttachment
+  string urls_json = 5;        // JSON array of strings
+  string source_meta_json = 6; // TelegramSourceMeta, etc.
+  string received_at = 7;      // ISO date
+}
+
+message GetRawContentRequest {
+  string id = 1;
+}
+
+message UpdateRawContentStatusRequest {
+  string id = 1;
+  string status = 2; // PENDING, PROCESSING, COMPLETED, FAILED
+  string processed_at = 3;
+}
+
+message ListPendingRawContentRequest {
+  int32 limit = 1;
+}
+
+message ListRawContentRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+  string status = 3;
+  string source_id = 4;
+}
+
+message ListRawContentResponse {
+  repeated RawContentResponse items = 1;
+  int32 total = 2;
+}
+
+message CheckRawContentExistsRequest {
+  string source_id = 1;
+  repeated string external_ids = 2;
+}
+
+message CheckRawContentExistsResponse {
+  repeated string existing_external_ids = 1;
+}
+
+// --- CONTENT UNIT ---
+
+message ContentUnitResponse {
+  string id = 1;
+  string raw_content_id = 2;
+  int32 unit_index = 3;
+  int32 quality_score = 4;
+  string quality_reasoning = 5;
+  string original_text = 6;
+  string content_type = 7;
+  string categories_json = 8;
+  string summary = 9;
+  string sentiment = 10;
+  string keywords_json = 11;
+  string language = 12;
+  string entities_json = 13;
+  string linked_media_indexes_json = 14;
+  bool needs_fact_check = 15;
+  string fact_check_hint_json = 16;
+  string fact_check_result_json = 17;
+  string qdrant_id = 18;
+  string embedding_model = 19;
+  string topic_id = 20;
+  string created_at = 21;
+  string updated_at = 22;
+}
+
+message CreateContentUnitRequest {
+  string raw_content_id = 1;
+  int32 unit_index = 2;
+  int32 quality_score = 3;
+  string quality_reasoning = 4;
+  string original_text = 5;
+  string content_type = 6;
+  string categories_json = 7;
+  string summary = 8;
+  string sentiment = 9;
+  string keywords_json = 10;
+  string language = 11;
+  string entities_json = 12;
+  string linked_media_indexes_json = 13;
+  bool needs_fact_check = 14;
+  string fact_check_hint_json = 15;
+}
+
+message CreateContentUnitsRequest {
+  repeated CreateContentUnitRequest units = 1;
+}
+
+message CreateContentUnitsResponse {
+  repeated ContentUnitResponse units = 1;
+}
+
+message GetContentUnitRequest {
+  string id = 1;
+}
+
+message ListContentUnitsRequest {
+  string raw_content_id = 1;
+  int32 min_quality_score = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+message ListContentUnitsResponse {
+  repeated ContentUnitResponse items = 1;
+  int32 total = 2;
+}
+
+message UpdateContentUnitVectorRequest {
+  string id = 1;
+  string qdrant_id = 2;
+  string embedding_model = 3;
+}
+
+// --- CONTENT UNIT VECTOR ---
+
+message UpsertContentUnitVectorRequest {
+  string unit_id = 1;
+  repeated float vector = 2;
+  string summary = 3;
+  string content_type = 4;
+  string language = 5;
+}
+
+message UpsertContentUnitVectorResponse {
+  string qdrant_id = 1;
+  bool success = 2;
+}
+
+message UpdateContentUnitTopicRequest {
+  string id = 1;
+  string topic_id = 2;
+}
+
+message SearchSimilarUnitsRequest {
+  string qdrant_id = 1;
+  int32 limit = 2;
+  float min_score = 3;
+}
+
+message SimilarUnitResult {
+  string unit_id = 1;
+  string topic_id = 2;
+  float score = 3;
+}
+
+message SearchSimilarUnitsResponse {
+  repeated SimilarUnitResult units = 1;
+}
+
+message Empty {}

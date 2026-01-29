@@ -11,6 +11,8 @@ import { SourcesModule } from './sources';
 import { WorkspaceDonorsModule } from './workspace-donors';
 import { TargetsModule } from './targets';
 import { ContentModule } from './content/content.module';
+import { TopicsModule } from './topics/topics.module';
+import { AiPromptsModule } from './modules/ai-prompts/ai-prompts.module';
 import { LoggerMiddleware } from '@logger';
 
 @Module({
@@ -24,6 +26,8 @@ import { LoggerMiddleware } from '@logger';
     WorkspaceDonorsModule,
     TargetsModule,
     ContentModule,
+    TopicsModule,
+    AiPromptsModule,
   ],
   controllers: [CoreController, TelegramQueueController],
   providers: [CoreService],

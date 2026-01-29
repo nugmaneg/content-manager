@@ -26,11 +26,11 @@ const aiQueueRegistration = BullModule.registerQueue({
           ...(config.get<string>('REDIS_URL')
             ? { url: config.getOrThrow<string>('REDIS_URL') }
             : {
-              host: config.getOrThrow<string>('REDIS_HOST'),
-              port: config.getOrThrow<number>('REDIS_PORT'),
-              password: config.get<string>('REDIS_PASSWORD'),
-              username: config.get<string>('REDIS_USERNAME'),
-            }),
+                host: config.getOrThrow<string>('REDIS_HOST'),
+                port: config.getOrThrow<number>('REDIS_PORT'),
+                password: config.get<string>('REDIS_PASSWORD'),
+                username: config.get<string>('REDIS_USERNAME'),
+              }),
         },
         defaultJobOptions: {
           removeOnComplete: true,
@@ -41,6 +41,11 @@ const aiQueueRegistration = BullModule.registerQueue({
     aiQueueRegistration,
   ],
   providers: [TelegramParseProducer, AiProducer],
-  exports: [TelegramParseProducer, AiProducer, telegramQueueRegistration, aiQueueRegistration],
+  exports: [
+    TelegramParseProducer,
+    AiProducer,
+    telegramQueueRegistration,
+    aiQueueRegistration,
+  ],
 })
-export class QueuesModule { }
+export class QueuesModule {}

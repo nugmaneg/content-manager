@@ -16,9 +16,9 @@ datasource db {
 // ===========================================
 
 model Source {
-  id         String  @id @default(uuid())
-  type       String  // 'telegram', 'twitter', 'rss', etc.
-  externalId String  // channel username, feed URL, etc.
+  id         String @id @default(uuid())
+  type       String // 'telegram', 'twitter', 'rss', etc.
+  externalId String // channel username, feed URL, etc.
 
   // Общие поля
   name        String?
@@ -35,6 +35,7 @@ model Source {
   updatedAt DateTime @updatedAt
 
   contents                  Content[]
+  rawContents               RawContent[]
   workspaceDonors           WorkspaceDonor[]
   integrationAccountSources IntegrationAccountSource[]
 
@@ -77,8 +78,8 @@ model Content {
   status ContentStatus @default(pending)
 
   // Векторное хранилище
-  qdrantId       String?  @unique
-  isVectorized   Boolean  @default(false)
+  qdrantId       String? @unique
+  isVectorized   Boolean @default(false)
   embeddingModel String?
 
   aiAnalysis Json?
@@ -161,11 +162,17 @@ model Topic {
   relevanceScore Float     @default(1.0)
   isExpired      Boolean   @default(false)
 
+  // Fact-checking на уровне Topic (один раз для всех юнитов)
+  factCheckStatus FactCheckStatus @default(NOT_REQUIRED)
+  factCheckResult Json?
+  factCheckedAt   DateTime?
+
   firstSeenAt DateTime @default(now())
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   contentTopics   ContentTopic[]
+  contentUnits    ContentUnit[]
   topicTags       TopicTag[]
   workspaceTopics WorkspaceTopic[]
   parentRelations TopicRelation[]  @relation("TopicParent")
@@ -176,6 +183,7 @@ model Topic {
   @@index([createdAt])
   @@index([isExpired])
   @@index([language])
+  @@index([factCheckStatus])
 }
 
 enum TopicType {
@@ -188,6 +196,13 @@ enum TopicType {
   announcement
   quote
   other
+}
+
+enum FactCheckStatus {
+  NOT_REQUIRED  // Все юниты — мнения/другое, проверка не нужна
+  PENDING       // Есть юниты с needsFactCheck, ждёт проверки
+  CHECKED       // Проверено
+  SKIPPED       // Пропущено редактором
 }
 
 model ContentTopic {
@@ -290,7 +305,7 @@ model AiAgent {
   modelName String
 
   systemPrompt String
-  temperature  Float @default(0.7)
+  temperature  Float  @default(0.7)
   settings     Json?
 
   isActive Boolean @default(true)
@@ -336,11 +351,102 @@ model AiLog {
   success Boolean
   error   String?
 
+  // Промпт метрики (новое)
+  promptKey     String? // Какой промпт использовался
+  promptVersion Int? // Версия промпта
+  step          String? // 'classification', 'analysis', 'fact_check'
+  usedWebSearch Boolean @default(false) // Использовался ли веб-поиск
+
   createdAt DateTime @default(now())
 
   @@index([agentId])
   @@index([resourceType, resourceId])
   @@index([createdAt])
+  @@index([promptKey])
+  @@index([step])
+}
+
+// ===========================================
+// AI PROMPTS - Управление промптами
+// ===========================================
+
+enum PromptCategory {
+  CLASSIFICATION
+  ANALYSIS
+  FACT_CHECK
+  SYSTEM
+  GENERATION
+  OTHER
+}
+
+model AiPrompt {
+  id          String  @id @default(uuid())
+  key         String  @unique // например: 'xai.classification.system'
+  name        String // Человеко-читаемое название
+  description String? // Описание промпта
+
+  // Содержимое промпта
+  template String @db.Text // Сам промпт (может содержать {{переменные}})
+
+  // Метаданные
+  provider String // 'xai', 'openai', 'all'
+  category PromptCategory // 'CLASSIFICATION', 'ANALYSIS', 'FACT_CHECK', 'SYSTEM'
+
+  // Версионирование
+  version  Int     @default(1)
+  isActive Boolean @default(true)
+
+  // A/B тестирование (опционально)
+  variantGroup String? // Группа для A/B теста
+  variantName  String? // Название варианта (A, B, C)
+
+  // Параметры модели (опционально)
+  modelSettings Json? // температура, maxTokens и т.д.
+
+  // Метрики использования
+  usageCount Int       @default(0)
+  lastUsedAt DateTime?
+
+  // Метрики эффективности (опционально)
+  avgLatencyMs Float?
+  successRate  Float?
+  avgCost      Float?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+  createdBy   User?    @relation(fields: [createdById], references: [id])
+
+  // История изменений
+  versions AiPromptVersion[]
+
+  @@index([key])
+  @@index([category])
+  @@index([provider])
+  @@index([isActive])
+  @@index([variantGroup])
+}
+
+model AiPromptVersion {
+  id       String   @id @default(uuid())
+  promptId String
+  prompt   AiPrompt @relation(fields: [promptId], references: [id], onDelete: Cascade)
+
+  version  Int
+  template String @db.Text
+
+  changeNote String? // Причина изменения
+  changedBy  String?
+
+  // Метрики этой версии
+  usageCount  Int    @default(0)
+  successRate Float?
+  avgCost     Float?
+
+  createdAt DateTime @default(now())
+
+  @@unique([promptId, version])
+  @@index([promptId])
 }
 
 // ===========================================
@@ -368,6 +474,7 @@ model User {
   workspaceUsers      WorkspaceUser[]
   integrationAccounts IntegrationAccount[]
   auditLogs           AuditLog[]
+  createdPrompts      AiPrompt[]
 }
 
 enum UserRole {
@@ -590,6 +697,120 @@ model PublicationStats {
 }
 
 // ===========================================
+// RAW CONTENT LAYER - Сырой контент и юниты анализа
+// ===========================================
+
+// Статус обработки сырого контента
+enum RawContentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// Сырой контент (то, что мы получаем из источника)
+model RawContent {
+  id String @id @default(uuid())
+
+  // Источник
+  sourceId   String
+  source     Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  externalId String // ID сообщения в источнике (Telegram post ID и т.п.)
+
+  // Данные
+  text           String @db.Text
+  mediaJson      Json? // массив MediaAttachment
+  urlsJson       Json? // массив URL-ов
+  sourceMetaJson Json // TelegramSourceMeta и т.п.
+
+  // Контекст (для Telegram)
+  forwardedFromJson Json? // { channelId, channelName, postId, originalDate }
+  replyToPostId     String?
+
+  // Статус
+  status RawContentStatus @default(PENDING)
+  error  String?
+
+  // Связи
+  units ContentUnit[]
+
+  // Timestamps
+  receivedAt  DateTime
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Индексы
+  @@unique([sourceId, externalId])
+  @@index([sourceId])
+  @@index([status])
+  @@index([receivedAt])
+  @@index([createdAt])
+}
+
+// Проанализированный юнит контента
+model ContentUnit {
+  id String @id @default(uuid())
+
+  // Связь с сырым контентом
+  rawContentId String
+  rawContent   RawContent @relation(fields: [rawContentId], references: [id], onDelete: Cascade)
+
+  // Порядок и качество
+  unitIndex        Int
+  qualityScore     Int // 0-100, оценка качества от AI
+  qualityReasoning String @db.Text // объяснение оценки
+
+  // Оригинальный текст юнита
+  originalText String @db.Text
+
+  // Классификация
+  contentType    String // ContentType
+  secondaryTypes Json? // string[]
+  categories     Json // ContentCategory[]
+  tags           Json? // string[]
+
+  // Анализ
+  summary   String @db.Text
+  sentiment String
+  keywords  Json // string[]
+  language  String
+
+  // Сущности
+  entitiesJson Json? // { organizations, people, tickers, locations }
+
+  // Связи с медиа
+  linkedMediaIndexes Json? // number[]
+
+  // Фактчекинг
+  needsFactCheck  Boolean @default(false)
+  factCheckHint   Json? // { reason, targets: { claims, entities } }
+  factCheckResult Json? // FactCheckResult
+
+  // Embedding для поиска
+  qdrantId       String? @unique
+  embeddingModel String?
+
+  // Связь с Topic
+  topicId String?
+  topic   Topic?  @relation(fields: [topicId], references: [id])
+
+  // Timestamps
+  analyzedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Индексы
+  @@unique([rawContentId, unitIndex])
+  @@index([rawContentId])
+  @@index([topicId])
+  @@index([contentType])
+  @@index([qualityScore])
+  @@index([analyzedAt])
+  @@index([createdAt])
+}
+
+// ===========================================
 // INFRASTRUCTURE LAYER - Аккаунты, прокси, логи
 // ===========================================
 
@@ -653,7 +874,7 @@ enum AccountStatus {
 }
 
 model Proxy {
-  id       String @id @default(uuid())
+  id       String  @id @default(uuid())
   protocol String
   host     String
   port     Int

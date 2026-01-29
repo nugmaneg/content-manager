@@ -52,6 +52,18 @@ export class TelegramProcessor extends WorkerHost {
           sessionName,
           limit: getData.limit, // Pass the limit
         });
+
+        // Логирование перед возвратом в Core
+        if (messages.length > 0) {
+          const firstMsg = messages[0];
+          this.logger.debug(
+            `[TEXT_TRACE] TelegramProcessor returning message:\n` +
+            `  - ID: ${firstMsg.id}\n` +
+            `  - Text length: ${firstMsg.message?.length || 0}\n` +
+            `  - Text preview: ${firstMsg.message?.substring(0, 100)}`,
+          );
+        }
+
         return { status: 'received', messages: messages };
 
       default:

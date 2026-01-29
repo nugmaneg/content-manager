@@ -4,9 +4,9 @@ import { WorkspacesService } from './workspaces.service';
 import { AuthModule } from '../auth';
 
 @Module({
-    imports: [AuthModule],
-    controllers: [WorkspacesController],
-    providers: [WorkspacesService],
-    exports: [WorkspacesService],
+  imports: [AuthModule],
+  controllers: [WorkspacesController],
+  providers: [WorkspacesService],
+  exports: [WorkspacesService],
 })
-export class WorkspacesModule { }
+export class WorkspacesModule {}
