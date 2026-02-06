@@ -83,6 +83,43 @@ export class OpenAiProvider implements AiProvider {
   }
 
   // ===========================================
+  // THREE-STAGE ARCHITECTURE METHODS
+  // ===========================================
+
+  /**
+   * STAGE 1: Сегментация контента на смысловые единицы.
+   * TODO: Not implemented for OpenAI provider yet.
+   */
+  async segmentContent(
+    input: ContentInput,
+    options?: GenerationOptions,
+  ): Promise<ProviderResponse<any>> {
+    throw new Error('segmentContent() not implemented for OpenAI provider. Use XAI provider instead.');
+  }
+
+  /**
+   * STAGE 2: Глубокий анализ ContentUnit.
+   * TODO: Not implemented for OpenAI provider yet.
+   */
+  async analyzeContentUnit(
+    unit: any,
+    options?: GenerationOptions,
+  ): Promise<ProviderResponse<ContentUnitAnalysis>> {
+    throw new Error('analyzeContentUnit() not implemented for OpenAI provider. Use XAI provider instead.');
+  }
+
+  /**
+   * STAGE 3: Факт-чекинг контента (batch).
+   * TODO: Not implemented for OpenAI provider yet.
+   */
+  async factCheckContent(
+    units: ContentUnitAnalysis[],
+    options?: GenerationOptions,
+  ): Promise<ProviderResponse<any>> {
+    throw new Error('factCheckContent() not implemented for OpenAI provider. Use XAI provider instead.');
+  }
+
+  // ===========================================
   // 2-STEP FLOW METHODS
   // ===========================================
 
@@ -117,7 +154,10 @@ export class OpenAiProvider implements AiProvider {
           language: legacyResult.result.language,
           entities: legacyResult.result.entities,
           needsFactCheck: legacyResult.result.needsFactCheck,
-          factCheckHint: legacyResult.result.factCheckHint,
+          factCheckHint: legacyResult.result.factCheckHint ? {
+            reason: legacyResult.result.factCheckHint.reason,
+            targets: [], // Legacy format doesn't have structured targets
+          } : undefined,
         }],
         aggregated: {
           primaryType: legacyResult.result.contentType,
@@ -155,21 +195,14 @@ export class OpenAiProvider implements AiProvider {
     text: string,
     options?: GenerationOptions,
   ): Promise<ProviderResponse<ContentAnalysisResult>> {
-    // Загрузка промптов из БД
-    const systemPromptData = await this.promptsService.getPromptWithSettings(
-      'openai.analysis.system',
-    );
-    const userPromptData = await this.promptsService.getPromptWithSettings(
-      'openai.analysis.user',
-    );
-    const userPrompt = this.promptsService.renderPrompt(
-      userPromptData.template,
-      { text },
-    );
+    // Используем новый API PromptsService
+    const systemPrompt = await this.promptsService.getPrompt('analysis', 'system');
+    const userPromptTemplate = await this.promptsService.getPrompt('analysis', 'user');
+    const userPrompt = userPromptTemplate.replace(/\{\{text\}\}/g, text);
 
-    // Модель берём из системного промпта или дефолт
-    const model = systemPromptData.modelSettings?.model || DEFAULT_MODEL;
-    const temperature = systemPromptData.modelSettings?.temperature;
+    // Модель берём из опций или дефолт
+    const model = options?.model || DEFAULT_MODEL;
+    const temperature = options?.temperature;
 
     try {
       const analysisSchema = z.object({
@@ -233,7 +266,7 @@ export class OpenAiProvider implements AiProvider {
       const result = await generateText({
         model: this.openai(model),
         output: Output.object({ schema: analysisSchema }),
-        system: systemPromptData.template,
+        system: systemPrompt,
         prompt: userPrompt,
         temperature,
       });
@@ -295,7 +328,13 @@ export class OpenAiProvider implements AiProvider {
       categories: unit.categories,
       tags: unit.tags,
       needsFactCheck: unit.needsFactCheck,
-      factCheckHint: unit.factCheckHint,
+      factCheckHint: unit.factCheckHint ? {
+        reason: unit.factCheckHint.reason,
+        targets: {
+          claims: unit.factCheckHint.targets?.map(t => t.claim) || [],
+          entities: [], // Legacy format doesn't have entities list
+        },
+      } : undefined,
     };
 
     return this._factCheckContent(unit.originalText, legacyAnalysis, options);
@@ -311,31 +350,24 @@ export class OpenAiProvider implements AiProvider {
     analysis: ContentAnalysisResult,
     options?: GenerationOptions,
   ): Promise<ProviderResponse<FactCheckResult>> {
-    // Загрузка промптов из БД
-    const systemPromptData = await this.promptsService.getPromptWithSettings(
-      'openai.factcheck.system',
-    );
-    const userPromptData = await this.promptsService.getPromptWithSettings(
-      'openai.factcheck.user',
-    );
+    // Используем новый API PromptsService
+    const systemPrompt = await this.promptsService.getPrompt('fact-check', 'system');
+    const userPromptTemplate = await this.promptsService.getPrompt('fact-check', 'user');
 
     const claimsToCheck = analysis.factCheckHint?.targets?.claims || [];
     const entitiesToCheck = analysis.factCheckHint?.targets?.entities || [];
 
-    const userPrompt = this.promptsService.renderPrompt(
-      userPromptData.template,
-      {
-        text,
-        entities: JSON.stringify(analysis.entities),
-        summary: analysis.summary,
-        keywords: analysis.keywords.join(', '),
-        claims: claimsToCheck.join('\n- '),
-        entitiesToCheck: entitiesToCheck.join(', '),
-      },
-    );
+    // Подстановка переменных вручную
+    let userPrompt = userPromptTemplate
+      .replace(/\{\{text\}\}/g, text)
+      .replace(/\{\{entities\}\}/g, JSON.stringify(analysis.entities))
+      .replace(/\{\{summary\}\}/g, analysis.summary)
+      .replace(/\{\{keywords\}\}/g, analysis.keywords.join(', '))
+      .replace(/\{\{claims\}\}/g, claimsToCheck.join('\n- '))
+      .replace(/\{\{entitiesToCheck\}\}/g, entitiesToCheck.join(', '));
 
-    const model = systemPromptData.modelSettings?.model || DEFAULT_MODEL;
-    const temperature = systemPromptData.modelSettings?.temperature;
+    const model = options?.model || DEFAULT_MODEL;
+    const temperature = options?.temperature;
 
     try {
       // Те же схемы что и в XAiProvider
@@ -368,7 +400,7 @@ export class OpenAiProvider implements AiProvider {
       const result = await generateText({
         model: this.openai(model),
         output: Output.object({ schema: factCheckSchema }),
-        system: systemPromptData.template,
+        system: systemPrompt,
         prompt: userPrompt,
         temperature,
         // OpenAI здесь не имеет встроенного поиска как Grok через searchParameters

@@ -5,6 +5,9 @@ import {
   ContentInput,
   FullContentAnalysisResult,
   ContentUnitAnalysis,
+  ContentSegmentationResult,
+  ContentUnitBasic,
+  FactCheckContentResult,
 } from '@queue-contracts/ai';
 
 export { GenerationOptions, ContentAnalysisResult, FactCheckResult };
@@ -33,7 +36,38 @@ export interface AiProvider {
   generateEmbedding(text: string): Promise<number[]>;
 
   // ===========================================
-  // ANALYSIS METHODS
+  // THREE-STAGE ARCHITECTURE METHODS
+  // ===========================================
+
+  /**
+   * STAGE 1: Сегментация контента на смысловые единицы (ContentUnits).
+   * Быстрый этап: ~4-6 сек, ~$0.003
+   */
+  segmentContent(
+    input: ContentInput,
+    options?: GenerationOptions,
+  ): Promise<ProviderResponse<ContentSegmentationResult>>;
+
+  /**
+   * STAGE 2: Глубокий анализ ContentUnit.
+   * Средний этап: ~2-3 сек на unit, ~$0.002
+   */
+  analyzeContentUnit(
+    unit: ContentUnitBasic,
+    options?: GenerationOptions,
+  ): Promise<ProviderResponse<ContentUnitAnalysis>>;
+
+  /**
+   * STAGE 3: Факт-чекинг контента (batch).
+   * Медленный этап: ~6-8 сек на unit, ~$0.010
+   */
+  factCheckContent(
+    units: ContentUnitAnalysis[],
+    options?: GenerationOptions,
+  ): Promise<ProviderResponse<FactCheckContentResult>>;
+
+  // ===========================================
+  // ANALYSIS METHODS (full flow)
   // ===========================================
 
   /**

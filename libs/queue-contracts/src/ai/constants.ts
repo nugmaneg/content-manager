@@ -125,8 +125,9 @@ export const QUEUE_CONTENT_ANALYSIS = 'content_analysis' as const;
 export const JOBS_AI = {
     generateText: 'generate_text',
     generateEmbedding: 'generate_embedding',
-    analyzeContent: 'analyze_content',
-    factCheckContent: 'fact_check_content',
+    segmentContent: 'segment_content', // STAGE 1: сегментация RawContent
+    analyzeContentUnit: 'analyze_content_unit', // STAGE 2: анализ каждого ContentUnit
+    factCheckContent: 'fact_check_content', // STAGE 3: факт-чекинг
 } as const;
 
 export type AiJobName = (typeof JOBS_AI)[keyof typeof JOBS_AI];

@@ -4,6 +4,38 @@
  * Определяет имена очередей и типы job-ов для обработки контента.
  */
 
+// ===========================================
+// STATE MACHINE ENUMS
+// ===========================================
+
+/**
+ * Статус обработки RawContent (общий статус pipeline)
+ */
+export enum RawContentStatus {
+    PENDING = 'PENDING',        // Ждёт обработки
+    SEGMENTED = 'SEGMENTED',    // Stage 1 завершен → ContentUnits созданы
+    PROCESSING = 'PROCESSING',  // Обрабатываем ContentUnits (stages 2-5)
+    COMPLETED = 'COMPLETED',    // Всё готово
+    FAILED = 'FAILED',          // Критическая ошибка
+}
+
+/**
+ * Статус обработки ContentUnit (детальный статус каждого юнита)
+ */
+export enum ContentUnitStatus {
+    PENDING = 'PENDING',            // Создан, ждёт анализа
+    ANALYZED = 'ANALYZED',          // Stage 2: summary, entities, keywords готовы
+    VECTORIZED = 'VECTORIZED',      // Stage 3: embedding создан, сохранен в Qdrant
+    MATCHED = 'MATCHED',            // Stage 4: привязан к Topic
+    FACT_CHECKED = 'FACT_CHECKED', // Stage 5: fact-check пройден
+    READY = 'READY',                // Полностью готов
+    ERROR = 'ERROR',                // Ошибка обработки
+}
+
+// ===========================================
+// QUEUE CONFIGURATION
+// ===========================================
+
 // Имя очереди для обработки контента
 export const QUEUE_CONTENT_PIPELINE = 'content-pipeline';
 

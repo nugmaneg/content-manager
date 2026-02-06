@@ -5,21 +5,24 @@ import { AiProviderFactory } from '../providers/ai-provider.factory';
 import {
   QUEUE_AI_PROCESSING,
   JOBS_AI,
+  AiJobName,
+} from '../queues/queues.constants';
+import {
   GenerateTextPayload,
   GenerateEmbeddingPayload,
   EmbeddingResult,
-  AiJobName,
-  AnalyzeTextPayload,
-  AnalyzeContentPayload,
-  ContentInput,
-} from '../queues/queues.constants';
+  SegmentContentPayload,
+  AnalyzeContentUnitPayload,
+  FactCheckContentPayload,
+} from '@queue-contracts/ai';
 import { AnalysisOrchestratorService } from '../orchestrator/analysis-orchestrator.service';
 
 type AiJobPayload =
   | GenerateTextPayload
-  | AnalyzeTextPayload
-  | AnalyzeContentPayload
-  | GenerateEmbeddingPayload;
+  | GenerateEmbeddingPayload
+  | SegmentContentPayload
+  | AnalyzeContentUnitPayload
+  | FactCheckContentPayload;
 
 @Processor(QUEUE_AI_PROCESSING)
 export class AiProcessor extends WorkerHost {
@@ -39,12 +42,16 @@ export class AiProcessor extends WorkerHost {
       switch (job.name) {
         case JOBS_AI.generateText:
           return this.handleGenerateText(job.data as GenerateTextPayload);
-        case JOBS_AI.analyzeContent:
-          return this.handleAnalyzeContent(job.data as AnalyzeContentPayload | AnalyzeTextPayload);
         case JOBS_AI.generateEmbedding:
           return this.handleGenerateEmbedding(
             job.data as GenerateEmbeddingPayload,
           );
+        case JOBS_AI.segmentContent:
+          return this.handleSegmentContent(job.data as SegmentContentPayload);
+        case JOBS_AI.analyzeContentUnit:
+          return this.handleAnalyzeContentUnit(job.data as AnalyzeContentUnitPayload);
+        case JOBS_AI.factCheckContent:
+          return this.handleFactCheckContent(job.data as FactCheckContentPayload);
         default:
           return this.logger.warn(`Unknown job name: ${job.name}`);
       }
@@ -62,40 +69,6 @@ export class AiProcessor extends WorkerHost {
     return await provider.generateText(data.prompt, data.options);
   }
 
-  /**
-   * Обработка анализа контента.
-   * Поддерживает как новый AnalyzeContentPayload, так и legacy AnalyzeTextPayload.
-   */
-  private async handleAnalyzeContent(data: AnalyzeContentPayload | AnalyzeTextPayload) {
-    let input: ContentInput;
-    let providerName = 'xai';
-
-    // Определяем формат payload
-    if ('input' in data && data.input) {
-      // Новый формат: AnalyzeContentPayload
-      input = data.input;
-      this.logger.log(`Processing new format payload for rawContentId: ${data.rawContentId}`);
-    } else if ('text' in data) {
-      // Legacy формат: AnalyzeTextPayload
-      providerName = (data as AnalyzeTextPayload).provider || 'xai';
-      input = {
-        text: data.text,
-        source: { platform: 'other' as const },
-      };
-      this.logger.log(`Processing legacy format payload (text length: ${data.text.length})`);
-    } else {
-      throw new Error('Invalid payload format: missing "input" or "text" field');
-    }
-
-    // Используем 2-step flow через оркестратор
-    this.logger.log(`Using 2-step flow analysis for provider: ${providerName}`);
-    return await this.orchestrator.analyzeContent(
-      input,
-      providerName,
-      (data as AnalyzeTextPayload).options,
-    );
-  }
-
   private async handleGenerateEmbedding(
     data: GenerateEmbeddingPayload,
   ): Promise<EmbeddingResult> {
@@ -111,5 +84,33 @@ export class AiProcessor extends WorkerHost {
       model: 'text-embedding-3-small',
       dimensions: embedding.length,
     };
+  }
+
+  // ===========================================
+  // THREE-STAGE ARCHITECTURE HANDLERS
+  // ===========================================
+
+  /**
+   * STAGE 1: Обработчик сегментации контента.
+   */
+  private async handleSegmentContent(data: SegmentContentPayload) {
+    const { input, provider = 'xai', options } = data;
+    return await this.orchestrator.segmentContent(input, provider, options);
+  }
+
+  /**
+   * STAGE 2: Обработчик анализа ContentUnit.
+   */
+  private async handleAnalyzeContentUnit(data: AnalyzeContentUnitPayload) {
+    const { unit, provider = 'xai', options } = data;
+    return await this.orchestrator.analyzeContentUnit(unit, provider, options);
+  }
+
+  /**
+   * STAGE 3: Обработчик факт-чекинга.
+   */
+  private async handleFactCheckContent(data: FactCheckContentPayload) {
+    const { units, provider = 'xai', options } = data;
+    return await this.orchestrator.factCheckContent(units, provider, options);
   }
 }

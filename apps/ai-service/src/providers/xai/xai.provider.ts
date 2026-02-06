@@ -11,6 +11,7 @@ import {
 } from '../../interfaces/ai-provider.interface';
 import {
   FactCheckResult,
+  FactCheckContentResult,
   CONTENT_TYPES,
   CONTENT_CATEGORIES,
   FACT_CHECK_VERDICTS,
@@ -24,6 +25,8 @@ import {
   ContentType,
   ContentCategory,
   ContentStructure,
+  ContentUnitBasic,
+  ContentSegmentationResult,
 } from '@queue-contracts/ai';
 import { PromptsService } from '../../prompts/prompts.service';
 
@@ -87,20 +90,14 @@ export class XAiProvider implements AiProvider {
     text: string,
     options?: GenerationOptions,
   ): Promise<ProviderResponse<ContentAnalysisResult>> {
-    // Загрузка промптов из БД с настройками модели
-    const systemPromptData = await this.promptsService.getPromptWithSettings(
-      'xai.analysis.system',
-    );
-    const userPromptData =
-      await this.promptsService.getPromptWithSettings('xai.analysis.user');
-    const userPrompt = this.promptsService.renderPrompt(
-      userPromptData.template,
-      { text },
-    );
+    // Загрузка промптов из файлов (новый API)
+    const systemPrompt = await this.promptsService.getPrompt('analysis', 'system');
+    const userPromptTemplate = await this.promptsService.getPrompt('analysis', 'user');
+    const userPrompt = userPromptTemplate.replace(/\{\{text\}\}/g, text);
 
-    // Модель берём из системного промпта
-    const model = systemPromptData.modelSettings?.model || DEFAULT_MODEL;
-    const temperature = systemPromptData.modelSettings?.temperature;
+    // Модель по умолчанию (настройки теперь в конфиге)
+    const model = DEFAULT_MODEL;
+    const temperature = options?.temperature;
 
     try {
       // Схема анализа (плоская структура)
@@ -188,7 +185,7 @@ export class XAiProvider implements AiProvider {
       const result = await generateText({
         model: this.xai(model),
         output: Output.object({ schema: analysisSchema }),
-        system: systemPromptData.template,
+        system: systemPrompt,
         prompt: userPrompt,
         temperature,
         // БЕЗ webSearch - это важно для экономии
@@ -234,28 +231,210 @@ export class XAiProvider implements AiProvider {
 
   /**
    * Фактчекинг конкретного юнита контента с веб-поиском.
-   * Использует данные из ContentUnitAnalysis для формирования запроса.
+   * Использует подготовленные queries из factCheckHint.targets[].
    */
   async factCheckUnit(
     unit: ContentUnitAnalysis,
     options?: GenerationOptions,
   ): Promise<ProviderResponse<FactCheckResult>> {
-    // Создаём legacy-совместимый объект для _factCheckContent
-    const legacyAnalysis: ContentAnalysisResult = {
-      summary: unit.summary,
-      sentiment: unit.sentiment,
-      keywords: unit.keywords,
-      entities: unit.entities,
-      language: unit.language,
-      contentType: unit.contentType,
-      secondaryTypes: unit.secondaryTypes,
-      categories: unit.categories,
-      tags: unit.tags,
-      needsFactCheck: unit.needsFactCheck,
-      factCheckHint: unit.factCheckHint,
-    };
+    const startTime = Date.now();
 
-    return this._factCheckContent(unit.originalText, legacyAnalysis, options);
+    // Загрузить system prompt из файла
+    const systemPrompt = await this.promptsService.getPrompt(
+      'fact-check',
+      'fact-check-default',
+    );
+
+    // Получить targets из factCheckHint
+    const targets = unit.factCheckHint?.targets || [];
+
+    // Сформировать промпт с targets
+    const userPrompt = `
+Проверь фактические утверждения в следующем тексте:
+
+"${unit.originalText}"
+
+Summary: ${unit.summary}
+
+${targets.length > 0 ? `
+УТВЕРЖДЕНИЯ ДЛЯ ПРОВЕРКИ (с рекомендуемыми запросами):
+
+${targets
+          .map(
+            (t, i) => `
+${i + 1}. Утверждение: "${t.claim}"
+   Важность: ${t.importance || 'medium'}
+   Рекомендуемые поисковые запросы:
+   ${t.queries.map((q) => `   - ${q}`).join('\n')}
+`,
+          )
+          .join('\n')}
+
+Используй рекомендованные запросы для веб-поиска, чтобы найти достоверные источники.
+` : ''}
+
+Выполни веб-поиск и проверь каждое утверждение.
+    `.trim();
+
+    try {
+      // Zod схема для FactCheckResult
+      const sourceSchema = z.object({
+        url: z.string(),
+        title: z.string().optional(),
+        publisher: z.string().optional(),
+        publishedAt: z.string().optional(),
+        quote: z.string().optional(),
+        reliability: z.enum(SOURCE_RELIABILITY).optional(),
+      });
+
+      const claimVerificationSchema = z.object({
+        claim: z.string(),
+        status: z.enum(CLAIM_STATUSES),
+        verdict: z.enum(FACT_CHECK_VERDICTS).optional(),
+        score: z.number().min(0).max(1).optional(),
+        explanation: z.string(),
+        sources: z.array(sourceSchema),
+      });
+
+      const factCheckSchema = z.object({
+        verdict: z.enum(FACT_CHECK_VERDICTS),
+        score: z.number().min(0).max(1),
+        explanation: z.string(),
+        claims: z.array(claimVerificationSchema),
+        searchPerformed: z.boolean(),
+      });
+
+      let searchResultsCount = 0;
+      const searchQueries: string[] = [];
+
+      // Вызов с включённым веб-поиском
+      const resultRaw = await generateText({
+        model: this.xai(options?.model || DEFAULT_MODEL),
+        output: Output.object({ schema: factCheckSchema }),
+        providerOptions: {
+          xai: {
+            searchParameters: {
+              mode: 'on', // Принудительно включаем поиск
+              returnCitations: true,
+              maxSearchResults: 8,
+            },
+          },
+        },
+        onStepFinish: (step) => {
+          // Отслеживаем поисковые запросы
+          if (step.toolCalls && step.toolCalls.length > 0) {
+            for (const tc of step.toolCalls) {
+              const toolCall = tc as any;
+              if (toolCall.toolName === 'web_search' && toolCall.args?.query) {
+                searchQueries.push(toolCall.args.query as string);
+              }
+            }
+          }
+          if (step.toolResults && step.toolResults.length > 0) {
+            searchResultsCount += step.toolResults.length;
+          }
+        },
+        system: systemPrompt,
+        prompt: userPrompt,
+        temperature: options?.temperature ?? 0.3,
+      });
+
+      const { output, usage, response } = resultRaw;
+      const durationMs = Date.now() - startTime;
+
+      const result: FactCheckResult = {
+        ...output,
+        searchQueries: searchQueries.length > 0 ? searchQueries : undefined,
+        searchResultsCount,
+      };
+
+      this.logger.log(
+        `✅ factCheckUnit: verdict=${result.verdict}, score=${result.score}, ${durationMs}ms`,
+      );
+
+      return {
+        result,
+        meta: {
+          model: options?.model || DEFAULT_MODEL,
+          totalTokens: usage?.totalTokens,
+          promptTokens: usage?.inputTokens,
+          completionTokens: usage?.outputTokens,
+          requestId: response?.id,
+        },
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error in factCheckUnit: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      // Fallback
+      return {
+        result: {
+          verdict: 'unverified',
+          score: 0,
+          explanation: 'Error during fact-checking',
+          claims: [],
+          searchPerformed: false,
+        },
+        meta: {
+          model: options?.model || DEFAULT_MODEL,
+        },
+      };
+    }
+  }
+
+  /**
+   * STAGE 3: Факт-чекинг контента (batch).
+   * Обрабатывает массив ContentUnitAnalysis и возвращает результат.
+   *
+   * @param units - Массив ContentUnitAnalysis для факт-чекинга
+   * @param options - Опции генерации
+   * @returns FactCheckContentResult
+   */
+  async factCheckContent(
+    units: ContentUnitAnalysis[],
+    options?: GenerationOptions,
+  ): Promise<ProviderResponse<FactCheckContentResult>> {
+    const startTime = Date.now();
+    const results: ContentUnitAnalysis[] = [];
+    let totalCost = 0;
+
+    this.logger.log(
+      `🚀 factCheckContent: starting fact-check for ${units.length} units`,
+    );
+
+    for (const unit of units) {
+      const { result: factCheckResult, meta } = await this.factCheckUnit(
+        unit,
+        options,
+      );
+
+      // Добавить факт-чекинг к unit
+      unit.factCheckResult = factCheckResult;
+      results.push(unit);
+
+      // Примерная стоимость (можно улучшить с реальными данными от xAI)
+      if (meta.totalTokens) {
+        const estimatedCost = (meta.totalTokens / 1000000) * 10; // ~$10 per 1M tokens
+        totalCost += estimatedCost;
+      }
+    }
+
+    const totalDurationMs = Date.now() - startTime;
+
+    this.logger.log(
+      `✅ factCheckContent: ${results.length} units checked, cost=$${totalCost.toFixed(4)}, ${totalDurationMs}ms`,
+    );
+
+    return {
+      result: {
+        units: results,
+        totalCost,
+        totalDurationMs,
+      },
+      meta: {
+        model: options?.model || DEFAULT_MODEL,
+      },
+    };
   }
 
   /**
@@ -267,32 +446,26 @@ export class XAiProvider implements AiProvider {
     analysis: ContentAnalysisResult,
     options?: GenerationOptions,
   ): Promise<ProviderResponse<FactCheckResult>> {
-    // Загрузка промптов из БД с настройками модели
-    const systemPromptData = await this.promptsService.getPromptWithSettings(
-      'xai.factcheck.system',
-    );
-    const userPromptData =
-      await this.promptsService.getPromptWithSettings('xai.factcheck.user');
+    // Загрузка промптов из файлов (новый API)
+    const systemPrompt = await this.promptsService.getPrompt('fact-check', 'system');
+    const userPromptTemplate = await this.promptsService.getPrompt('fact-check', 'user');
 
     // Получаем claims из анализа (если есть)
     const claimsToCheck = analysis.factCheckHint?.targets?.claims || [];
     const entitiesToCheck = analysis.factCheckHint?.targets?.entities || [];
 
-    const userPrompt = this.promptsService.renderPrompt(
-      userPromptData.template,
-      {
-        text,
-        entities: JSON.stringify(analysis.entities),
-        summary: analysis.summary,
-        keywords: analysis.keywords.join(', '),
-        claims: claimsToCheck.join('\n- '),
-        entitiesToCheck: entitiesToCheck.join(', '),
-      },
-    );
+    // Ручной рендеринг шаблона
+    const userPrompt = userPromptTemplate
+      .replace(/\{\{text\}\}/g, text)
+      .replace(/\{\{entities\}\}/g, JSON.stringify(analysis.entities))
+      .replace(/\{\{summary\}\}/g, analysis.summary)
+      .replace(/\{\{keywords\}\}/g, analysis.keywords.join(', '))
+      .replace(/\{\{claims\}\}/g, claimsToCheck.join('\n- '))
+      .replace(/\{\{entitiesToCheck\}\}/g, entitiesToCheck.join(', '));
 
-    // Модель берём из системного промпта
-    const model = systemPromptData.modelSettings?.model || DEFAULT_MODEL;
-    const temperature = systemPromptData.modelSettings?.temperature;
+    // Модель по умолчанию (настройки теперь в конфиге)
+    const model = DEFAULT_MODEL;
+    const temperature = options?.temperature;
 
     try {
       // Zod схема для FactCheckResult (используем константы из контракта)
@@ -354,7 +527,7 @@ export class XAiProvider implements AiProvider {
             this.logger.debug(`Sources found: ${step.sources.length}`);
           }
         },
-        system: systemPromptData.template,
+        system: systemPrompt,
         prompt: userPrompt,
         temperature,
       });
@@ -398,8 +571,227 @@ export class XAiProvider implements AiProvider {
   }
 
   // ===========================================
-  // SEGMENTATION + UNIT ANALYSIS
+  // THREE-STAGE ARCHITECTURE METHODS
   // ===========================================
+
+  /**
+   * STAGE 1: Сегментация контента на смысловые единицы (ContentUnits).
+   * Быстрый этап: ~4-6 сек, ~$0.003
+   *
+   * @param input - Входной контент (текст + метаданные)
+   * @param options - Опции генерации
+   * @returns ContentSegmentationResult с массивом ContentUnitBasic
+   */
+  async segmentContent(
+    input: ContentInput,
+    options?: GenerationOptions,
+  ): Promise<ProviderResponse<ContentSegmentationResult>> {
+    const startTime = Date.now();
+
+    // Загрузить system prompt из файла
+    const systemPrompt = await this.promptsService.getPrompt(
+      'segmentation',
+      'segment-content',
+    );
+
+    // Сформировать user prompt
+    const userPrompt = `
+Проанализируй следующий контент и раздели его на логические смысловые единицы (units).
+
+Контент:
+"${input.text}"
+
+Платформа: ${input.source.platform}
+${'authorUsername' in input.source && input.source.authorUsername ? `Автор: ${input.source.authorUsername}` : ''}
+${input.media && input.media.length > 0 ? `Медиа: ${input.media.length} файлов` : ''}
+
+Для каждого unit определи:
+- unitIndex — порядковый номер unit (0, 1, 2...)
+- originalText — текст unit (дословно из оригинала)
+- contentType — тип контента (news/opinion/analysis/guide/announcement/discussion/entertainment/promotion/other)
+- qualityScore — оценка значимости (0-100)
+- qualityReasoning — пояснение оценки (1-2 предложения)
+- language — язык контента (ru/en/uk/...)
+
+Верни JSON массив units.
+    `.trim();
+
+    // Zod схема для сегментации
+    const segmentationSchema = z.object({
+      units: z.array(
+        z.object({
+          unitIndex: z.number(),
+          originalText: z.string(),
+          contentType: z.enum(CONTENT_TYPES),
+          qualityScore: z.number().min(0).max(100),
+          qualityReasoning: z.string(),
+          language: z.string(),
+        }),
+      ),
+    });
+
+    try {
+      // Вызов AI
+      const result = await generateText({
+        model: this.xai(options?.model || DEFAULT_MODEL),
+        output: Output.object({ schema: segmentationSchema }),
+        system: systemPrompt,
+        prompt: userPrompt,
+        temperature: options?.temperature ?? 0.3,
+      });
+
+      const { output, usage, response } = result;
+      const durationMs = Date.now() - startTime;
+
+      this.logger.log(
+        `✅ segmentContent: ${output.units.length} units, ${durationMs}ms, tokens=${usage?.totalTokens}`,
+      );
+
+      return {
+        result: output as ContentSegmentationResult,
+        meta: {
+          model: options?.model || DEFAULT_MODEL,
+          totalTokens: usage?.totalTokens,
+          promptTokens: usage?.inputTokens,
+          completionTokens: usage?.outputTokens,
+          requestId: response?.id,
+        },
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error in segmentContent: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * STAGE 2: Глубокий анализ ContentUnit.
+   * Средний этап: ~2-3 сек на unit, ~$0.002
+   *
+   * @param unit - ContentUnitBasic для анализа
+   * @param options - Опции генерации
+   * @returns ContentUnitAnalysis с enriched данными
+   */
+  async analyzeContentUnit(
+    unit: ContentUnitBasic,
+    options?: GenerationOptions,
+  ): Promise<ProviderResponse<ContentUnitAnalysis>> {
+    const startTime = Date.now();
+
+    // Загрузить system prompt из файла
+    const systemPrompt = await this.promptsService.getPrompt(
+      'analysis',
+      'analyze-unit',
+    );
+
+    // Сформировать user prompt
+    const userPrompt = `
+Проведи глубокий анализ следующего контента:
+
+"${unit.originalText}"
+
+Тип: ${unit.contentType}
+Язык: ${unit.language}
+Quality Score: ${unit.qualityScore}
+
+Верни:
+1. summary — краткое изложение (до 25 слов)
+2. entities — сущности (люди, места, организации, даты...)
+3. keywords — ключевые слова (3-7 штук)
+4. sentiment — тональность (positive/neutral/negative, score 0-1)
+5. needsFactCheck — нужен ли факт-чекинг (true/false)
+6. factCheckHint — если needsFactCheck=true, то укажи:
+   - reason — почему нужен факт-чекинг
+   - targets — список утверждений с поисковыми запросами:
+     - claim — утверждение для проверки
+     - queries — массив поисковых запросов (2-5 штук)
+     - importance — важность (high/medium/low)
+    `.trim();
+
+    // Zod схема для анализа unit
+    const factCheckTargetSchema = z.object({
+      claim: z.string(),
+      queries: z.array(z.string()),
+      importance: z.enum(['high', 'medium', 'low']).optional(),
+    });
+
+    const factCheckHintSchema = z.object({
+      reason: z.string(),
+      targets: z.array(factCheckTargetSchema),
+    });
+
+    const unitAnalysisSchema = z.object({
+      summary: z.string(),
+      entities: z
+        .object({
+          organizations: z.array(z.string()).optional(),
+          people: z.array(z.string()).optional(),
+          tickers: z.array(z.string()).optional(),
+          locations: z.array(z.string()).optional(),
+        })
+        .optional(),
+      keywords: z.array(z.string()),
+      sentiment: z.object({
+        label: z.enum(['positive', 'neutral', 'negative']),
+        score: z.number().min(0).max(1),
+      }),
+      needsFactCheck: z.boolean(),
+      factCheckHint: factCheckHintSchema.optional(),
+    });
+
+    try {
+      // Вызов AI
+      const result = await generateText({
+        model: this.xai(options?.model || DEFAULT_MODEL),
+        output: Output.object({ schema: unitAnalysisSchema }),
+        system: systemPrompt,
+        prompt: userPrompt,
+        temperature: options?.temperature ?? 0.3,
+      });
+
+      const { output, usage, response } = result;
+      const durationMs = Date.now() - startTime;
+
+      // Собрать финальный результат (соединить с базовыми полями)
+      const analysisResult: ContentUnitAnalysis = {
+        unitIndex: unit.unitIndex,
+        qualityScore: unit.qualityScore,
+        qualityReasoning: unit.qualityReasoning,
+        originalText: unit.originalText,
+        contentType: unit.contentType,
+        categories: [], // Оставляем пустым, так как в новой архитектуре это не заполняется на Stage 2
+        summary: output.summary,
+        sentiment: output.sentiment.label, // Используем только label, а не весь объект
+        keywords: output.keywords,
+        language: unit.language,
+        entities: output.entities,
+        needsFactCheck: output.needsFactCheck,
+        factCheckHint: output.factCheckHint,
+        // factCheckResult будет заполнено позже (в Stage 3)
+      };
+
+      this.logger.log(
+        `✅ analyzeContentUnit: unit ${unit.unitIndex}, needsFactCheck=${output.needsFactCheck}, ${durationMs}ms`,
+      );
+
+      return {
+        result: analysisResult,
+        meta: {
+          model: options?.model || DEFAULT_MODEL,
+          totalTokens: usage?.totalTokens,
+          promptTokens: usage?.inputTokens,
+          completionTokens: usage?.outputTokens,
+          requestId: response?.id,
+        },
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error in analyzeContentUnit: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
 
   /**
    * Основной метод анализа контента с сегментацией на юниты.
@@ -412,19 +804,14 @@ export class XAiProvider implements AiProvider {
     options?: GenerationOptions,
   ): Promise<ProviderResponse<FullContentAnalysisResult>> {
     const text = input.text;
-    const systemPromptData = await this.promptsService.getPromptWithSettings(
-      'xai.analysis.system',
-    );
-    const userPromptData = await this.promptsService.getPromptWithSettings(
-      'xai.analysis.user',
-    );
-    const userPrompt = this.promptsService.renderPrompt(
-      userPromptData.template,
-      { text },
-    );
 
-    const model = systemPromptData.modelSettings?.model || DEFAULT_MODEL;
-    const temperature = systemPromptData.modelSettings?.temperature ?? 0.2;
+    // Используем новый API PromptsService
+    const systemPrompt = await this.promptsService.getPrompt('analysis', 'system');
+    const userPromptTemplate = await this.promptsService.getPrompt('analysis', 'user');
+    const userPrompt = userPromptTemplate.replace(/\{\{text\}\}/g, text);
+
+    const model = options?.model || DEFAULT_MODEL;
+    const temperature = options?.temperature ?? 0.2;
 
     try {
       // Схема для юнита
@@ -683,7 +1070,7 @@ export class XAiProvider implements AiProvider {
       const result = await generateText({
         model: this.xai(model),
         output: Output.object({ schema: segmentationSchema }),
-        system: systemPromptData.template,
+        system: systemPrompt,
         prompt: userPrompt,
         temperature,
       });

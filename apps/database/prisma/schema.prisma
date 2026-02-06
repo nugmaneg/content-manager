@@ -700,12 +700,24 @@ model PublicationStats {
 // RAW CONTENT LAYER - Сырой контент и юниты анализа
 // ===========================================
 
-// Статус обработки сырого контента
+// Статус обработки сырого контента (общий статус pipeline)
 enum RawContentStatus {
-  PENDING
-  PROCESSING
-  COMPLETED
-  FAILED
+  PENDING      // Ждёт обработки
+  SEGMENTED    // Stage 1 завершен → ContentUnits созданы
+  PROCESSING   // Обрабатываем ContentUnits (stages 2-5)
+  COMPLETED    // Всё готово
+  FAILED       // Критическая ошибка
+}
+
+// Статус обработки ContentUnit (детальный статус каждого юнита)
+enum ContentUnitStatus {
+  PENDING      // Создан, ждёт анализа
+  ANALYZED     // Stage 2: summary, entities, keywords готовы
+  VECTORIZED   // Stage 3: embedding создан, сохранен в Qdrant
+  MATCHED      // Stage 4: привязан к Topic
+  FACT_CHECKED // Stage 5: fact-check пройден (опционально)
+  READY        // Полностью готов
+  ERROR        // Ошибка обработки
 }
 
 // Сырой контент (то, что мы получаем из источника)
@@ -730,6 +742,11 @@ model RawContent {
   // Статус
   status RawContentStatus @default(PENDING)
   error  String?
+
+  // State Machine поля (для идемпотентности и retry)
+  retryCount         Int      @default(0)
+  processingMetadata Json?    // метаданные обработки
+  stateUpdatedAt     DateTime @default(now())
 
   // Связи
   units ContentUnit[]
@@ -795,6 +812,11 @@ model ContentUnit {
   topicId String?
   topic   Topic?  @relation(fields: [topicId], references: [id])
 
+  // State Machine (для идемпотентности)
+  status       ContentUnitStatus @default(PENDING)
+  errorMessage String?
+  processedAt  DateTime?
+
   // Timestamps
   analyzedAt DateTime @default(now())
   createdAt  DateTime @default(now())
@@ -808,6 +830,8 @@ model ContentUnit {
   @@index([qualityScore])
   @@index([analyzedAt])
   @@index([createdAt])
+  @@index([status])
+  @@index([rawContentId, status])
 }
 
 // ===========================================

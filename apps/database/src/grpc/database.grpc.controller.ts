@@ -114,6 +114,22 @@ interface UpdateContentUnitVectorRequest {
   qdrant_id: string;
   embedding_model: string;
 }
+interface UpdateContentUnitAnalysisRequest {
+  id: string;
+  summary?: string;
+  entities?: any; // ContentEntities
+  keywords?: string[];
+  sentiment?: any; // { label, score }
+  needsFactCheck?: boolean;
+  factCheckHint?: any; // FactCheckHint
+}
+interface UpdateContentUnitFactCheckRequest {
+  id: string;
+  factCheckResult: any; // FactCheckResult
+}
+interface UpdateContentUnitsFactCheckRequest {
+  updates: UpdateContentUnitFactCheckRequest[];
+}
 
 // Topic
 interface GetTopicRequest {
@@ -834,6 +850,37 @@ export class DatabaseGrpcController {
         score: result.score,
       })),
     };
+  }
+
+  @GrpcMethod('DatabaseService', 'GetVectorByQdrantId')
+  async getVectorByQdrantId(data: {
+    collection_name: string;
+    qdrant_id: string;
+  }) {
+    if (!data.collection_name || !data.qdrant_id) {
+      throw new RpcException({
+        code: status.INVALID_ARGUMENT,
+        message: 'Collection name and Qdrant ID required',
+      });
+    }
+
+    try {
+      const vector = await this.qdrant.getVectorByQdrantId(
+        data.collection_name,
+        data.qdrant_id,
+      );
+
+      return { vector };
+    } catch (error) {
+      this.logger.error(
+        `Failed to get vector for ${data.qdrant_id} from ${data.collection_name}:`,
+        error,
+      );
+      throw new RpcException({
+        code: status.NOT_FOUND,
+        message: `Vector not found: ${error instanceof Error ? error.message : error}`,
+      });
+    }
   }
 
   // ===================================
@@ -2536,7 +2583,7 @@ export class DatabaseGrpcController {
     // Получить topic_id для каждого unit_id из БД
     const unitsWithTopics = await Promise.all(
       results.map(async (r) => {
-        if (!r.unitId) return { unit_id: '', topic_id: '', score: r.score };
+        if (!r.unitId) return { unit_id: '', topic_id: '', qdrant_id: r.qdrantId, score: r.score };
 
         const unit = await this.prisma.contentUnit.findUnique({
           where: { id: r.unitId },
@@ -2546,12 +2593,55 @@ export class DatabaseGrpcController {
         return {
           unit_id: r.unitId,
           topic_id: unit?.topicId || '',
+          qdrant_id: r.qdrantId,
           score: r.score,
         };
       }),
     );
 
     return { units: unitsWithTopics };
+  }
+
+  @GrpcMethod('DatabaseService', 'UpdateContentUnitAnalysis')
+  async updateContentUnitAnalysis(data: UpdateContentUnitAnalysisRequest) {
+    const unit = await this.prisma.contentUnit.update({
+      where: { id: data.id },
+      data: {
+        summary: data.summary,
+        entitiesJson: data.entities ? JSON.stringify(data.entities) : undefined,
+        keywords: data.keywords ? JSON.stringify(data.keywords) : undefined,
+        sentiment: data.sentiment,
+        needsFactCheck: data.needsFactCheck,
+        factCheckHint: data.factCheckHint
+          ? JSON.stringify(data.factCheckHint)
+          : undefined,
+      },
+    });
+
+    return this.mapContentUnit(unit);
+  }
+
+  @GrpcMethod('DatabaseService', 'UpdateContentUnitFactCheck')
+  async updateContentUnitFactCheck(data: UpdateContentUnitFactCheckRequest) {
+    const unit = await this.prisma.contentUnit.update({
+      where: { id: data.id },
+      data: {
+        factCheckResult: JSON.stringify(data.factCheckResult),
+      },
+    });
+
+    return this.mapContentUnit(unit);
+  }
+
+  @GrpcMethod('DatabaseService', 'UpdateContentUnitsFactCheck')
+  async updateContentUnitsFactCheck(data: UpdateContentUnitsFactCheckRequest) {
+    const promises = data.updates.map((u) =>
+      this.updateContentUnitFactCheck(u),
+    );
+
+    const results = await Promise.all(promises);
+
+    return { units: results };
   }
 }
 

@@ -159,11 +159,14 @@ services:
       - NODE_ENV=production
       - AI_PROCESSING_QUEUE=ai_processing
       - XAI_API_KEY=${XAI_API_KEY:-}
+      - PROMPTS_PATH=/app/prompts/templates
     depends_on:
       redis: { condition: service_healthy }
       database: { condition: service_started }
     ports: [ "3002:3002" ]
-    volumes: [ ./logs/ai-service:/app/logs ]
+    volumes:
+      - ./logs/ai-service:/app/logs
+      - ./apps/ai-service/src/prompts/templates:/app/prompts/templates
     restart: unless-stopped
     stop_grace_period: 30s
     networks: [ cm-network ]

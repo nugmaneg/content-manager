@@ -1,10 +1,5 @@
-import { Controller, Post, Body, Get, Query } from '@nestjs/common';
-import { AiServiceService } from './ai-service.service';
-import {
-  GenerateTextPayload,
-  AnalyzeTextPayload,
-  ContentInput,
-} from '@queue-contracts/ai';
+import { Controller, Post, Body, Get } from '@nestjs/common';
+import { ContentInput } from '@queue-contracts/ai';
 import { AnalysisOrchestratorService } from './orchestrator/analysis-orchestrator.service';
 
 // DTO для упрощённого тестирования
@@ -23,37 +18,18 @@ interface FullAnalyzeDto {
 @Controller('ai')
 export class AiServiceController {
   constructor(
-    private readonly aiServiceService: AiServiceService,
     private readonly orchestrator: AnalysisOrchestratorService,
   ) { }
 
   @Get()
   getHello(): string {
-    return this.aiServiceService.getHello();
+    return 'AI Service is running (Three-Stage Architecture)';
   }
 
   @Get('health')
   health() {
     return { status: 'OK', timestamp: new Date().toISOString() };
   }
-
-  // ===========================================
-  // QUEUE-BASED (через очередь)
-  // ===========================================
-
-  @Post('queue/generate')
-  async enqueueGenerateText(@Body() body: GenerateTextPayload) {
-    return this.aiServiceService.enqueueGenerateText(body);
-  }
-
-  @Post('queue/analyze')
-  async enqueueAnalyzeContent(@Body() body: AnalyzeTextPayload) {
-    return this.aiServiceService.enqueueAnalyzeContent(body);
-  }
-
-  // ===========================================
-  // DIRECT (прямой вызов для тестирования)
-  // ===========================================
 
   /**
    * Быстрый анализ текста (минимальный ввод)
@@ -82,21 +58,5 @@ export class AiServiceController {
       body.forceFactCheck,
       body.skipFactCheck,
     );
-  }
-
-  // ===========================================
-  // LEGACY (для обратной совместимости)
-  // ===========================================
-
-  /** @deprecated Use /ai/queue/generate */
-  @Post('test/generate')
-  async generateText(@Body() body: GenerateTextPayload) {
-    return this.aiServiceService.enqueueGenerateText(body);
-  }
-
-  /** @deprecated Use /ai/queue/analyze or /ai/analyze/quick */
-  @Post('test/analyze')
-  async analyzeContent(@Body() body: AnalyzeTextPayload) {
-    return this.aiServiceService.enqueueAnalyzeContent(body);
   }
 }

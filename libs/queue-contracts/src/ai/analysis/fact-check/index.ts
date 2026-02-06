@@ -57,15 +57,22 @@ export interface ClaimVerification {
 }
 
 // ===========================================
+// FACT CHECK TARGET
+// ===========================================
+
+export interface FactCheckTarget {
+    claim: string; // утверждение для проверки
+    queries: string[]; // поисковые запросы (2-5 штук)
+    importance?: 'high' | 'medium' | 'low';
+}
+
+// ===========================================
 // FACT CHECK HINT
 // ===========================================
 
 export interface FactCheckHint {
     reason: string;
-    targets?: {
-        claims?: string[];
-        entities?: string[];
-    };
+    targets: FactCheckTarget[]; // структурированные targets с queries
 }
 
 // ===========================================

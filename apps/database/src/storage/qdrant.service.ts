@@ -143,7 +143,7 @@ export class QdrantService implements OnModuleInit {
   async searchSimilarUnits(
     qdrantId: string,
     options: { limit?: number; minScore?: number },
-  ): Promise<Array<{ unitId: string; topicId: string; score: number }>> {
+  ): Promise<Array<{ unitId: string; topicId: string; qdrantId: string; score: number }>> {
     // Получить вектор по qdrantId
     const points = await this.client.retrieve(CONTENT_UNITS_COLLECTION, {
       ids: [qdrantId],
@@ -171,8 +171,49 @@ export class QdrantService implements OnModuleInit {
       .map((r) => ({
         unitId: (r.payload?.unit_id as string) || '',
         topicId: (r.payload?.topic_id as string) || '',
+        qdrantId: r.id as string, // ADD: return qdrantId
         score: r.score,
       }));
+  }
+
+  /**
+   * Поиск похожих Topics по вектору
+   */
+  async searchSimilarTopics(
+    vector: number[],
+    options: { limit?: number; minScore?: number },
+  ): Promise<Array<{ topicId: string; qdrantId: string; score: number }>> {
+    const results = await this.client.search(TOPIC_COLLECTION, {
+      vector,
+      limit: options.limit || 5,
+      score_threshold: options.minScore || 0.85,
+      with_payload: true,
+    });
+
+    return results.map((r) => ({
+      topicId: (r.payload?.topic_id as string) || '',
+      qdrantId: r.id as string,
+      score: r.score,
+    }));
+  }
+
+  /**
+   * Получить вектор по Qdrant ID
+   */
+  async getVectorByQdrantId(
+    collectionName: string,
+    qdrantId: string,
+  ): Promise<number[]> {
+    const points = await this.client.retrieve(collectionName, {
+      ids: [qdrantId],
+      with_vector: true,
+    });
+
+    if (!points.length || !points[0].vector) {
+      throw new Error(`Vector not found for qdrantId: ${qdrantId}`);
+    }
+
+    return points[0].vector as number[];
   }
 
   /**

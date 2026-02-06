@@ -61,11 +61,14 @@ export class PipelineService {
   }
 
   /**
+   * @deprecated Используйте ContentPipelineProcessor для новой трёхэтапной архитектуры
    * Обработка одного сообщения:
    * 1. Создать Content в БД
    * 2. AI анализ (xAI)
    * 3. Эмбеддинг summary (OpenAI)
    * 4. Обновить Content с результатами
+   * 
+   * TODO: Мигрировать на новую архитектуру через ContentPipelineProducer.processRawContent()
    */
   private async processMessage(source: any, message: any) {
     const externalId = `${source.external_id}:${message.id}`;
@@ -101,60 +104,18 @@ export class PipelineService {
       `Created content ${content.id} for message ${message.id}`,
     );
 
-    // 2. AI анализ (xAI) - используем analyzeText для обратной совместимости
-    this.logger.debug(`Starting AI analysis for content ${content.id}`);
-    const analysis = await this.aiProducer.analyzeText({
-      text: message.message,
-      rawContentId: content.id,
+    // DEPRECATED: Используйте ContentPipelineProcessor.handleProcessRawContent()
+    // Этот метод оставлен для обратной совместимости, но не рекомендуется к использованию
+    this.logger.warn(
+      `[DEPRECATED] processMessage() is deprecated. Use ContentPipelineProcessor instead.`,
+    );
+
+    // Просто обновляем статус - анализ должен происходить через новый pipeline
+    await this.dbClient.updateContent(content.id, {
+      status: 'pending_analysis',
     });
 
-    // Получить агрегированные данные из нового формата
-    const summary = analysis.aggregated.combinedSummary;
-    const category = analysis.aggregated.allCategories[0] || 'other';
-    const language = analysis.aggregated.language;
-
-    // 3. Эмбеддинг summary (OpenAI)
-    this.logger.debug(`Generating embedding for content ${content.id}`);
-    const embedding = await this.aiProducer.generateEmbedding({
-      text: summary,
-    });
-
-    // 4. Сохранить в Qdrant
-    this.logger.debug(`Saving vector to Qdrant for content ${content.id}`);
-    let qdrantId: string | undefined;
-    try {
-      const qdrantResult = await this.dbClient.upsertContentVector(content.id, {
-        vector: embedding.embedding,
-        summary,
-        category,
-        language,
-      });
-
-      qdrantId = qdrantResult.qdrant_id;
-      this.logger.debug(`Saved vector to Qdrant with id: ${qdrantId}`);
-    } catch (qdrantError) {
-      this.logger.warn(
-        `Failed to save vector to Qdrant for content ${content.id}:`,
-        qdrantError,
-      );
-      // Продолжаем без Qdrant - не критично
-    }
-
-    // 5. Обновить Content с результатами AI
-    this.logger.debug(`Updating content ${content.id} with AI results`);
-    try {
-      await this.dbClient.updateContent(content.id, {
-        aiAnalysis: analysis,
-        isVectorized: !!qdrantId,
-        embeddingModel: 'text-embedding-3-small',
-        qdrantId: qdrantId,
-        status: 'ready',
-      });
-      this.logger.debug(`Successfully enriched content ${content.id}`);
-    } catch (updateError) {
-      this.logger.error(`Failed to update content ${content.id}:`, updateError);
-      throw updateError;
-    }
+    this.logger.debug(`Content ${content.id} marked for processing`);
   }
 
   /**

@@ -215,6 +215,12 @@ interface RawContentResponse {
   received_at: string;
   processed_at: string;
   created_at: string;
+
+  // State Machine fields
+  retry_count?: number;
+  processing_metadata?: string;
+  state_updated_at?: string;
+
   content_units?: ContentUnitResponse[];
 }
 
@@ -259,6 +265,11 @@ interface ContentUnitResponse {
   qdrant_id: string;
   embedding_model: string;
   topic_id: string;
+
+  // State Machine fields
+  status?: string;
+  error_message?: string;
+  processed_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -586,6 +597,46 @@ interface DatabaseService {
     limit?: number;
     min_score?: number;
   }): Observable<{ units: SimilarUnitResult[] }>;
+  updateContentUnitAnalysis(data: {
+    id: string;
+    summary?: string;
+    entities_json?: string;
+    keywords_json?: string;
+    sentiment?: string;
+    needs_fact_check?: boolean;
+    fact_check_hint_json?: string;
+  }): Observable<ContentUnitResponse>;
+  updateContentUnitFactCheck(data: {
+    id: string;
+    fact_check_result_json: string;
+  }): Observable<ContentUnitResponse>;
+  updateContentUnitsFactCheck(data: {
+    updates: Array<{
+      id: string;
+      fact_check_result_json: string;
+    }>;
+  }): Observable<{ units: ContentUnitResponse[] }>;
+
+  // State Machine methods (новые для идемпотентности)
+  getContentUnitsByRawContentId(data: {
+    raw_content_id: string;
+  }): Observable<{ units: ContentUnitResponse[] }>;
+  updateContentUnitStatus(data: {
+    id: string;
+    status: string;
+    processed_at?: string;
+    error_message?: string;
+  }): Observable<ContentUnitResponse>;
+
+  searchSimilarTopics(data: {
+    vector: number[];
+    limit?: number;
+    min_score?: number;
+  }): Observable<{ topics: Array<{ topic_id: string; qdrant_id: string; score: number }> }>;
+  getVectorByQdrantId(data: {
+    collection_name: string;
+    qdrant_id: string;
+  }): Observable<{ vector: number[] }>;
 
   // Topic methods
   getTopic(data: { id: string }): Observable<TopicResponse>;
@@ -1465,6 +1516,12 @@ export class DatabaseGrpcClient implements OnModuleInit {
   // CONTENT UNIT METHODS
   // ===================================
 
+  async createContentUnit(
+    data: CreateContentUnitRequest,
+  ): Promise<ContentUnitResponse> {
+    return await firstValueFrom(this.databaseService.createContentUnit(data));
+  }
+
   async createContentUnits(
     units: CreateContentUnitRequest[],
   ): Promise<ContentUnitResponse[]> {
@@ -1558,6 +1615,150 @@ export class DatabaseGrpcClient implements OnModuleInit {
       }),
     );
     return result.units || [];
+  }
+
+  /**
+   * Обновить ContentUnit с результатами анализа из STAGE 2.
+   */
+  async updateContentUnitAnalysis(
+    id: string,
+    data: {
+      summary?: string;
+      entities?: any;
+      keywords?: string[];
+      sentiment?: any;
+      needsFactCheck?: boolean;
+      factCheckHint?: any;
+    },
+  ): Promise<ContentUnitResponse> {
+    return await firstValueFrom(
+      this.databaseService.updateContentUnitAnalysis({
+        id,
+        summary: data.summary,
+        entities_json: data.entities ? JSON.stringify(data.entities) : undefined,
+        keywords_json: data.keywords ? JSON.stringify(data.keywords) : undefined,
+        sentiment: data.sentiment ? JSON.stringify(data.sentiment) : undefined,
+        needs_fact_check: data.needsFactCheck,
+        fact_check_hint_json: data.factCheckHint
+          ? JSON.stringify(data.factCheckHint)
+          : undefined,
+      }),
+    );
+  }
+
+  /**
+   * Обновить ContentUnit с результатами факт-чекинга из STAGE 3.
+   */
+  async updateContentUnitFactCheck(
+    id: string,
+    factCheckResult: any,
+  ): Promise<ContentUnitResponse> {
+    return await firstValueFrom(
+      this.databaseService.updateContentUnitFactCheck({
+        id,
+        fact_check_result_json: JSON.stringify(factCheckResult),
+      }),
+    );
+  }
+
+  /**
+   * Batch обновление факт-чекинга для нескольких units.
+   */
+  async updateContentUnitsFactCheck(updates: Array<{ id: string; factCheckResult: any }>): Promise<ContentUnitResponse[]> {
+    const result = await firstValueFrom(
+      this.databaseService.updateContentUnitsFactCheck({
+        updates: updates.map((u) => ({
+          id: u.id,
+          fact_check_result_json: JSON.stringify(u.factCheckResult),
+        })),
+      }),
+    );
+    return result.units || [];
+  }
+
+  // ===========================================
+  // STATE MACHINE METHODS (для идемпотентности)
+  // ===========================================
+
+  /**
+   * Получить все ContentUnits для данного RawContent.
+   * Используется для идемпотентных переходов между этапами.
+   */
+  async getContentUnitsByRawContentId(rawContentId: string): Promise<ContentUnitResponse[]> {
+    const result = await firstValueFrom(
+      this.databaseService.getContentUnitsByRawContentId({
+        raw_content_id: rawContentId,
+      }),
+    );
+    return result.units || [];
+  }
+
+  /**
+   * Получить один ContentUnit по ID.
+   */
+  async getContentUnit(id: string): Promise<ContentUnitResponse> {
+    return await firstValueFrom(
+      this.databaseService.getContentUnit({ id }),
+    );
+  }
+
+  /**
+   * Обновить статус ContentUnit.
+   * Используется для отслеживания прогресса обработки.
+   */
+  async updateContentUnitStatus(
+    id: string,
+    status: string,
+    errorMessage?: string,
+  ): Promise<ContentUnitResponse> {
+    return await firstValueFrom(
+      this.databaseService.updateContentUnitStatus({
+        id,
+        status,
+        processed_at: new Date().toISOString(),
+        error_message: errorMessage,
+      }),
+    );
+  }
+
+  /**
+   * Поиск похожих Topics (двухуровневый поиск — LEVEL 1).
+   */
+  async searchSimilarTopics(
+    vector: number[],
+    options?: { limit?: number; minScore?: number },
+  ): Promise<Array<{ topicId: string; qdrantId: string; score: number }>> {
+    const result = await firstValueFrom(
+      this.databaseService.searchSimilarTopics({
+        vector,
+        limit: options?.limit,
+        min_score: options?.minScore,
+      }),
+    );
+    return (
+      result.topics?.map((t) => ({
+        topicId: t.topic_id,
+        qdrantId: t.qdrant_id,
+        score: t.score,
+      })) || []
+    );
+  }
+
+  /**
+   * Получить вектор из Qdrant по qdrant_id.
+   * Используется для LEVEL 1 поиска Topics.
+   */
+  async getVectorByQdrantId(
+    collectionName: string,
+    qdrantId: string,
+  ): Promise<number[]> {
+    const result = await firstValueFrom(
+      this.databaseService.getVectorByQdrantId({
+        collection_name: collectionName,
+        qdrant_id: qdrantId,
+      }),
+    );
+    return result.vector || [];
   }
 
   // ===================================

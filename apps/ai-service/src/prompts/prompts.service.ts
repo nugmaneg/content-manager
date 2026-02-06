@@ -1,148 +1,166 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { DatabaseGrpcClient } from '../grpc';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { promises as fs } from 'fs';
+import * as path from 'path';
 
-export interface ModelSettings {
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
-  [key: string]: any;
-}
-
-export interface PromptWithSettings {
-  template: string;
-  modelSettings: ModelSettings | null;
-}
-
-interface CachedPrompt {
-  template: string;
-  id: string; // Нужно знать ID для инкремента использования
-  modelSettings: ModelSettings | null;
-  timestamp: number;
-}
-
+/**
+ * PromptsService — Управление промптами через файловую систему
+ *
+ * Загружает промпты из .md файлов вместо хардкода в коде.
+ * Поддерживает Docker volume mapping для изменения промптов без пересборки.
+ */
 @Injectable()
-export class PromptsService {
+export class PromptsService implements OnModuleInit {
   private readonly logger = new Logger(PromptsService.name);
-  private readonly cache = new Map<string, CachedPrompt>();
-  private readonly cacheTTL = 5 * 60 * 1000; // 5 минут
+  private readonly promptsCache = new Map<string, string>();
+  private readonly basePath: string;
 
-  constructor(private readonly dbClient: DatabaseGrpcClient) { }
+  constructor() {
+    // В продакшене: /app/prompts/templates (Docker volume)
+    // В разработке: ./src/prompts/templates
+    this.basePath =
+      process.env.PROMPTS_PATH ||
+      path.join(__dirname, 'templates');
 
-  /**
-   * Получить промпт по ключу с кэшированием
-   */
-  async getPrompt(key: string): Promise<string> {
-    const result = await this.getPromptWithSettings(key);
-    return result.template;
+    this.logger.log(`Prompts base path: ${this.basePath}`);
+  }
+
+  async onModuleInit() {
+    // Загрузить все промпты при старте
+    await this.loadAllPrompts();
   }
 
   /**
-   * Получить промпт вместе с настройками модели (model, temperature, etc.)
-   * Используется для подстановки модели из БД
+   * Загрузить все промпты из директории
    */
-  async getPromptWithSettings(key: string): Promise<PromptWithSettings> {
-    // Проверка кэша
-    const cached = this.cache.get(key);
-    if (cached && Date.now() - cached.timestamp < this.cacheTTL) {
-      this.logger.debug(`Cache HIT for prompt: ${key}`);
-
-      // Фоновое обновление счетчика использования
-      this.incrementUsage(cached.id).catch((err) =>
-        this.logger.error(
-          `Failed to increment usage for cached prompt ${key}: ${err.message}`,
-        ),
-      );
-
-      return {
-        template: cached.template,
-        modelSettings: cached.modelSettings,
-      };
-    }
-
-    // Загрузка из gRPC
-    this.logger.debug(`Cache MISS for prompt: ${key}, loading from gRPC`);
-    const prompt = await this.dbClient.getAiPromptByKey(key);
-
-    if (!prompt || !prompt.is_active) {
-      this.logger.warn(`Prompt not found or inactive: ${key}`);
-      throw new Error(`Prompt '${key}' not found or inactive`);
-    }
-
-    // Парсинг modelSettings
-    let modelSettings: ModelSettings | null = null;
-    if (prompt.model_settings_json) {
-      try {
-        modelSettings = JSON.parse(prompt.model_settings_json);
-      } catch (e) {
-        this.logger.warn(`Failed to parse modelSettings for prompt ${key}`);
-      }
-    }
-
-    // Обновление usage count
-    await this.incrementUsage(prompt.id);
-
-    // Сохранение в кэш
-    this.cache.set(key, {
-      template: prompt.template,
-      id: prompt.id,
-      modelSettings,
-      timestamp: Date.now(),
-    });
-
-    return {
-      template: prompt.template,
-      modelSettings,
-    };
-  }
-
-  private async incrementUsage(id: string) {
+  private async loadAllPrompts() {
     try {
-      await this.dbClient.incrementAiPromptUsage(id);
+      const files = await this.findAllMarkdownFiles(this.basePath);
+
+      for (const file of files) {
+        try {
+          const content = await fs.readFile(file, 'utf-8');
+          const key = this.getPromptKey(file);
+          this.promptsCache.set(key, content);
+          this.logger.log(`✅ Loaded prompt: ${key}`);
+        } catch (error) {
+          this.logger.error(
+            `❌ Failed to load prompt ${file}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+
+      this.logger.log(
+        `📋 Loaded ${this.promptsCache.size} prompts from ${this.basePath}`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to increment usage for prompt ${id}: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.error(
+        `Failed to load prompts: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
   /**
-   * Рендеринг промпта с подстановкой переменных
-   * Поддерживает синтаксис: {{variable}}
+   * Найти все .md файлы рекурсивно
    */
-  renderPrompt(template: string, variables: Record<string, any>): string {
-    let rendered = template;
+  private async findAllMarkdownFiles(dir: string): Promise<string[]> {
+    const files: string[] = [];
 
-    for (const [key, value] of Object.entries(variables)) {
-      const placeholder = `{{${key}}}`;
-      const replacement =
-        typeof value === 'string' ? value : JSON.stringify(value);
-      rendered = rendered.replace(new RegExp(placeholder, 'g'), replacement);
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+
+        if (entry.isDirectory()) {
+          const subFiles = await this.findAllMarkdownFiles(fullPath);
+          files.push(...subFiles);
+        } else if (entry.isFile() && entry.name.endsWith('.md')) {
+          files.push(fullPath);
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Cannot read directory ${dir}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
-    return rendered;
+    return files;
   }
 
   /**
-   * Инвалидация кэша для конкретного промпта
+   * Получить ключ промпта из пути к файлу
+   * Например: /path/to/templates/segmentation/segment-content.md -> segmentation/segment-content
    */
-  invalidateCache(key: string): void {
-    this.cache.delete(key);
-    this.logger.log(`Cache invalidated for prompt: ${key}`);
+  private getPromptKey(filePath: string): string {
+    const relativePath = path.relative(this.basePath, filePath);
+    // Убираем расширение .md
+    return relativePath.replace(/\.md$/, '');
   }
 
   /**
-   * Очистка всего кэша
+   * Получить промпт по категории и имени
+   *
+   * @param category - Категория промпта (segmentation, analysis, fact-check)
+   * @param name - Имя файла без расширения
+   * @returns Содержимое промпта
    */
-  clearCache(): void {
-    this.cache.clear();
-    this.logger.log('All prompt cache cleared');
+  async getPrompt(
+    category: 'segmentation' | 'analysis' | 'fact-check',
+    name: string,
+  ): Promise<string> {
+    const key = `${category}/${name}`;
+
+    // Проверить кэш
+    if (this.promptsCache.has(key)) {
+      return this.promptsCache.get(key)!;
+    }
+
+    // Загрузить из файла (если не в кэше)
+    try {
+      const filePath = path.join(this.basePath, `${key}.md`);
+      const content = await fs.readFile(filePath, 'utf-8');
+      this.promptsCache.set(key, content);
+
+      this.logger.log(`📄 Loaded prompt on demand: ${key}`);
+
+      return content;
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to load prompt ${key}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw new Error(`Prompt not found: ${key}`);
+    }
   }
 
   /**
-   * Получить статистику кэша
+   * Перезагрузить промпт (для hot-reload в development)
+   *
+   * @param category - Категория промпта
+   * @param name - Имя файла без расширения
    */
-  getCacheStats() {
-    return {
-      size: this.cache.size,
-      keys: Array.from(this.cache.keys()),
-    };
+  async reloadPrompt(
+    category: 'segmentation' | 'analysis' | 'fact-check',
+    name: string,
+  ) {
+    const key = `${category}/${name}`;
+    const filePath = path.join(this.basePath, `${key}.md`);
+
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      this.promptsCache.set(key, content);
+      this.logger.log(`🔄 Reloaded prompt: ${key}`);
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to reload prompt ${key}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw new Error(`Failed to reload prompt: ${key}`);
+    }
+  }
+
+  /**
+   * Получить список всех загруженных промптов
+   */
+  getLoadedPrompts(): string[] {
+    return Array.from(this.promptsCache.keys());
   }
 }

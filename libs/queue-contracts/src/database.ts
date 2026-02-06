@@ -3,6 +3,9 @@
  * Контракты для асинхронной записи данных в БД
  */
 
+import type { ContentEntities } from './ai/analysis/output';
+import type { FactCheckResult, FactCheckHint } from './ai/analysis/fact-check';
+
 // Имя очереди для записи в БД
 export const QUEUE_DATABASE_STORAGE = 'database-storage';
 
@@ -55,4 +58,39 @@ export interface ContentCreatedResponse {
   id: string;
   sourceId: string;
   qdrantId: string | null;
+}
+
+// ===========================================
+// CONTENT UNIT REQUESTS (для gRPC/синхронных операций)
+// ===========================================
+
+/**
+ * Обновление анализа ContentUnit (Stage 2)
+ */
+export interface UpdateContentUnitAnalysisRequest {
+  id: string;
+  summary?: string;
+  entities?: ContentEntities;
+  keywords?: string[];
+  sentiment?: {
+    label: 'positive' | 'neutral' | 'negative';
+    score: number;
+  };
+  needsFactCheck?: boolean;
+  factCheckHint?: FactCheckHint;
+}
+
+/**
+ * Обновление факт-чекинга ContentUnit (Stage 3)
+ */
+export interface UpdateContentUnitFactCheckRequest {
+  id: string;
+  factCheckResult: FactCheckResult;
+}
+
+/**
+ * Batch обновление факт-чекинга (Stage 3)
+ */
+export interface UpdateContentUnitsFactCheckRequest {
+  updates: UpdateContentUnitFactCheckRequest[];
 }

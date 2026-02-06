@@ -108,7 +108,14 @@
     "testEnvironment": "node",
     "roots": [
       "<rootDir>/apps/"
-    ]
+    ],
+    "moduleNameMapper": {
+      "^@logger$": "<rootDir>/libs/logger/src/index",
+      "^@logger/(.*)$": "<rootDir>/libs/logger/src/$1",
+      "^@queue-contracts/(.*)$": "<rootDir>/libs/queue-contracts/src/$1",
+      "^@storage$": "<rootDir>/libs/storage/src/index",
+      "^@storage/(.*)$": "<rootDir>/libs/storage/src/$1"
+    }
   },
   "prisma": {
     "seed": "ts-node apps/database/prisma/seeds/ai-prompts.seed.ts"
